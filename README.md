@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/basebin/harperbot/main/.github/assets/thumbnail.png" alt="harperbot" width="100%">
+</p>
+
 # HarperBot
 
 Automated code review tool using Gemini or Cerebras AI for GitHub pull requests.
