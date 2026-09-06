@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/basebin/harperbot/main/.github/assets/thumbnail.png" alt="harperbot" width="100%">
+  <img src="https://raw.githubusercontent.com/Coccinella-Labs/harperbot/main/.github/assets/thumbnail.png" alt="harperbot" width="100%">
 </p>
 
 # HarperBot
@@ -8,7 +8,7 @@ Automated code review tool using Gemini or Cerebras AI for GitHub pull requests.
 
 ## Setup
 
-1. Clone: `git clone https://github.com/harpertoken/harperbot.git`
+1. Clone: `git clone https://github.com/Coccinella-Labs/harperbot.git`
 
 2. Install: `pip install -e .`
 
