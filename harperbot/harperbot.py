@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 harpertoken
+# Copyright (c) 2026 coccinella-labs
 
 #!/usr/bin/env python3
 """
@@ -462,7 +462,7 @@ def parse_diff_for_suggestions(diff_text):
 
 def format_comment(analysis):
     """Format the analysis with proper markdown and emojis."""
-    return f"""[![HarperBot](https://github.com/harpertoken/harperbot/actions/workflows/harperbot.yml/badge.svg)](https://github.com/harpertoken/harperbot/actions/workflows/harperbot.yml)
+    return f"""[![HarperBot](https://github.com/coccinella-labs/harperbot/actions/workflows/harperbot.yml/badge.svg)](https://github.com/coccinella-labs/harperbot/actions/workflows/harperbot.yml)
 
 <details>
 <summary>HarperBot Analysis</summary>

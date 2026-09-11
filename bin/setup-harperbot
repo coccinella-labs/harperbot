@@ -3,12 +3,12 @@
 # Setup script for HarperBot Workflow Mode
 # Copies required files to the current repository
 # WARNING: This script downloads and executes code from the internet.
-# Review the source at https://github.com/harpertoken/harperbot before running.
+# Review the source at https://github.com/coccinella-labs/harperbot before running.
 
 set -e
 
 # Default source repository
-SOURCE_REPO="${SOURCE_REPO:-https://github.com/harpertoken/harperbot.git}"
+SOURCE_REPO="${SOURCE_REPO:-https://github.com/coccinella-labs/harperbot.git}"
 
 # Check for required tools
 if ! command -v git >/dev/null 2>&1; then
@@ -109,7 +109,7 @@ if [ -f ".github/workflows/harperbot.yml" ] && ! $UPDATE_MODE; then
 fi
 
 # Get the source repository URL
-SOURCE_REPO="${SOURCE_REPO:-https://github.com/harpertoken/harperbot.git}"
+SOURCE_REPO="${SOURCE_REPO:-https://github.com/coccinella-labs/harperbot.git}"
 
 # Create temporary directory for cloning
 TEMP_DIR=$(mktemp -d)

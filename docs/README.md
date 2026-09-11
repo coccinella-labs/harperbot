@@ -42,7 +42,7 @@ This is the preferred mode for new installations. It uses a centralized deployme
 ### Workflow Mode (Legacy)
 *This mode is deprecated in favor of Webhook Mode. Support will continue for existing users, but new features and improvements will prioritize Webhook Mode.*
 
-1. Run the setup script: `curl -fsSL https://raw.githubusercontent.com/harpertoken/harperbot/main/bin/setup-harperbot | bash`
+1. Run the setup script: `curl -fsSL https://raw.githubusercontent.com/coccinella-labs/harperbot/main/bin/setup-harperbot | bash`
     (Use `--update` to update existing, `--dry-run` to preview, `--repo URL` for custom source)
     Or manually copy `harperbot/` and `.github/workflows/harperbot.yml` to your repository
 2. Set required secrets: `GEMINI_API_KEY`, `HARPER_BOT_APP_ID`, `HARPER_BOT_PRIVATE_KEY`

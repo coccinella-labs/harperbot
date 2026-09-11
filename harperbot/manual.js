@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2026 harpertoken
+// Copyright (c) 2026 coccinella-labs
 
 /**
  * manual.js

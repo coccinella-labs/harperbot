@@ -7,7 +7,7 @@ Required for PR comments. Errors with `create-github-app-token` indicate missing
 1. **Create GitHub App**:
    - URL: https://github.com/organizations/harpertoken/settings/apps
    - Name: `HarperBot`
-   - Homepage: https://github.com/harpertoken/harperbot
+   - Homepage: https://github.com/coccinella-labs/harperbot
    - Webhook: Disabled
    - Permissions:
      - Contents: Read
