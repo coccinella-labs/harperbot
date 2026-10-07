@@ -38,7 +38,7 @@ Provider-specific options are documented in `config.yaml`. Gemini supports safet
 
 The webhook endpoint at `api/webhook.py` listens for GitHub push events. When GitHub sends a push webhook, HarperBot extracts the commit diff, sends it to the AI provider with your configured focus settings, and posts review comments to the PR using the GitHub API. The webhook path should be registered in your GitHub App settings and secured with the webhook secret you configure.
 
-The CLI at `harperbot/harperbot.py` accepts command-line arguments for `--repo` (owner/repo format), `--pr` (PR number), and optional `--provider` and `--focus` overrides. The command is synchronous; HarperBot fetches the PR, analyzes it, and returns results before exiting.
+The CLI at `harperbot/harperbot.py` accepts command-line arguments for `--repo` (owner/repo format) and `--pr` (PR number) only. Provider and focus come from `harperbot/config.yaml`, not from flags. The command is synchronous; HarperBot fetches the PR, analyzes it, and returns results before exiting.
 
 ## Contributing
 

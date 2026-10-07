@@ -61,9 +61,8 @@ class TestHarperBot(unittest.TestCase):
             self.assertEqual(config["max_output_tokens"], 4096)
             self.assertIn("prompt", config)  # Should include default prompt
 
-    @patch("harperbot.genai.GenerativeModel")
     @patch("harperbot.load_config")
-    def test_analyze_with_gemini_success(self, mock_load_config, mock_model_class):
+    def test_analyze_with_gemini_success(self, mock_load_config):
         """Test successful Gemini analysis."""
         # Mock config with all required keys
         mock_load_config.return_value = {
@@ -75,18 +74,18 @@ class TestHarperBot(unittest.TestCase):
             "prompt": "Test prompt {num_files} {files_list} {diff_content} {focus_instruction}",
         }
 
-        # Mock model and response
-        mock_model = Mock()
+        # Mock client matching the genai.Client interface the code uses
+        mock_client = Mock()
         mock_response = Mock()
         mock_response.text = "Test analysis"
-        mock_model.generate_content.return_value = mock_response
-        mock_model_class.return_value = mock_model
+        mock_response.candidates = None
+        mock_client.models.generate_content.return_value = mock_response
 
         pr_details = {"title": "Test PR", "body": "Test body", "files_changed": ["test.py"], "diff": "test diff"}
 
-        result = analyze_with_gemini(pr_details)
+        result = analyze_with_gemini(mock_client, pr_details)
         self.assertEqual(result, "Test analysis")
-        mock_model.generate_content.assert_called_once()
+        mock_client.models.generate_content.assert_called_once()
 
     def test_parse_diff_for_suggestions_valid(self):
         """Test parsing diff suggestions."""
