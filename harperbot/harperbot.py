@@ -164,6 +164,17 @@ def load_config():
 
 {focus_instruction}
 
+Review discipline (these override any conflicting habit):
+- Judge only what the diff shows. If context is missing for a judgment,
+  say so instead of guessing.
+- Report problems only: bugs, risks, missing tests, security issues.
+  An empty findings list is a valid answer. Do not pad with praise or
+  restate the change as an achievement.
+- Every finding needs severity, the exact conditions that trigger it,
+  and evidence (file, line, the code in question). Do not flag what the
+  diff cannot support.
+- Style nits only if they cause real harm.
+
 Provide a concise code review analysis in this format:
 
 ## Summary
@@ -200,7 +211,7 @@ found, so counts and inline comments can be derived without parsing prose:
  "findings": [{"severity": "critical|high|medium|low|info",
    "category": "bug|security|performance|quality|style",
    "path": "relative/file.py", "line": 42,
-   "message": "what is wrong and why",
+   "message": "what is wrong, why, and the exact conditions that trigger it",
    "suggestion": "optional concrete fix"}]}
 ```
 An empty "findings" list is valid when nothing is wrong. Keep the
