@@ -5,7 +5,7 @@
 # WARNING: This script downloads and executes code from the internet.
 # Review the source at https://github.com/coccinella-labs/harperbot before running.
 
-set -e
+set -euo pipefail
 
 # Default source repository
 SOURCE_REPO="${SOURCE_REPO:-https://github.com/coccinella-labs/harperbot.git}"
@@ -66,7 +66,7 @@ if $UPDATE_MODE; then
     echo "Update mode selected. This will overwrite existing harperbot directory and .github/workflows/harperbot.yml."
     read -p "Are you sure you want to continue? (y/N): " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! ${REPLY:-} =~ ^[Yy]$ ]]; then
         echo "Setup cancelled."
         exit 0
     fi
@@ -117,18 +117,14 @@ TEMP_DIR=$(mktemp -d)
 trap "rm -rf '$TEMP_DIR'" EXIT
 
 echo "Downloading required files from repository..."
-if ! git archive --remote=$SOURCE_REPO HEAD harperbot .github/workflows/harperbot.yml setup-checksums.sha256 | tar -x -C $TEMP_DIR; then
-    echo "Error: Failed to download files from repository. Falling back to clone method."
-    # Fallback to clone method
-    if ! git clone --depth 1 --quiet $SOURCE_REPO $TEMP_DIR; then
-        echo "Error: Failed to clone source repository"
-        exit 1
-    fi
+if ! git clone --depth 1 --quiet "$SOURCE_REPO" "$TEMP_DIR/repo"; then
+    echo "Error: Failed to clone source repository"
+    exit 1
 fi
 
 if ! $DRY_RUN; then
 echo "Verifying file integrity before copying..."
-if ! sha256sum -c $TEMP_DIR/setup-checksums.sha256; then
+if ! (cd "$TEMP_DIR/repo" && sha256sum -c setup-checksums.sha256); then
     echo "Error: File integrity check failed. Downloaded files may be corrupted or tampered with."
     exit 1
 fi
@@ -136,12 +132,12 @@ echo "Integrity check passed."
 
 echo "Copying harperbot directory..."
 if $USE_RSYNC; then
-    if ! rsync -a $TEMP_DIR/harperbot/ ./harperbot/; then
+    if ! rsync -a $TEMP_DIR/repo/harperbot/ ./harperbot/; then
         echo "Error: Failed to copy harperbot directory with rsync"
         exit 1
     fi
 else
-    if ! cp -r $TEMP_DIR/harperbot .; then
+    if ! cp -r $TEMP_DIR/repo/harperbot .; then
         echo "Error: Failed to copy harperbot directory"
         exit 1
     fi
@@ -154,12 +150,12 @@ if ! mkdir -p .github/workflows; then
 fi
 
 if $USE_RSYNC; then
-    if ! rsync -a $TEMP_DIR/.github/workflows/harperbot.yml .github/workflows/; then
+    if ! rsync -a $TEMP_DIR/repo/.github/workflows/harperbot.yml .github/workflows/; then
         echo "Error: Failed to copy workflow file with rsync"
         exit 1
     fi
 else
-    if ! cp $TEMP_DIR/.github/workflows/harperbot.yml .github/workflows/; then
+    if ! cp $TEMP_DIR/repo/.github/workflows/harperbot.yml .github/workflows/; then
         echo "Error: Failed to copy workflow file"
         exit 1
     fi
@@ -174,7 +170,7 @@ if ! $DRY_RUN; then
     echo "Setup complete!"
     echo ""
     echo "Next steps:"
-    echo "1. Install Python dependencies: pip install PyGithub python-dotenv PyYAML google-generativeai"
+    echo "1. Install Python dependencies: pip install PyGithub python-dotenv PyYAML google-genai cerebras-cloud-sdk"
     echo "2. Set repository secrets: GEMINI_API_KEY, HARPER_BOT_APP_ID, HARPER_BOT_PRIVATE_KEY"
     echo "3. Optional: Configure harperbot/config.yaml"
     echo "4. Push changes and test with a PR"
