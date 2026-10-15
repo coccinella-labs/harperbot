@@ -5,7 +5,7 @@
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
     branches: [main]
   issue_comment:
     types: [created]
