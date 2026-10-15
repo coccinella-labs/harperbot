@@ -103,7 +103,7 @@ jobs:
           github.event.action == 'rerequested' ||
           github.event.requested_action.identifier == 'rerun-analysis'
         ) &&
-        length(github.event.check_run.check_suite.pull_requests) > 0
+        toJSON(github.event.check_run.check_suite.pull_requests) != '[]'
       )
     runs-on: ubuntu-latest
     container: python:3.11-slim
