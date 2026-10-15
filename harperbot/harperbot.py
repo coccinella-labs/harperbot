@@ -514,10 +514,10 @@ def analyze_with_gemini(client, pr_details):
                     return ("Error generating analysis: Invalid API key or "
                             f"authentication failed (provider openrouter, model "
                             f"{model_name}). Please check OPENROUTER_API_KEY.")
-                if code == 429:
+                if code in (402, 429):
                     return ("Error generating analysis: API quota exceeded "
                             f"(provider openrouter, model {model_name}). "
-                            f"Please try again later.")
+                            f"Please check billing or try again later.")
                 raise
             data = resp.json()
             resolved = data.get("model", model_name)
