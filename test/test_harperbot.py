@@ -556,7 +556,7 @@ class TestOpenRouterProvider(unittest.TestCase):
                     out = analyze_with_gemini(Mock(), self._details())
                     self.assertEqual(out, "looks good")
                     body = mp.call_args[1]["json"]
-                    self.assertEqual(body["model"], "openai/gpt-5.2")
+                    self.assertEqual(body["model"], "openrouter/auto")
                     self.assertEqual(body["messages"][0]["role"], "user")
 
     def test_auth_failure_maps_to_auth_message(self):

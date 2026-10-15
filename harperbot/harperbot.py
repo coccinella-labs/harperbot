@@ -405,7 +405,7 @@ def analyze_with_gemini(client, pr_details):
         elif provider == "openrouter":
             # Pinned default; openrouter/auto without an allow-list would
             # route unrestricted, which is a separate, unbuilt feature.
-            model_name = config.get("openrouter_model", "openai/gpt-5.2")
+            model_name = config.get("openrouter_model", "openrouter/auto")
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 

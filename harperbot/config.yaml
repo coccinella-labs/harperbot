@@ -42,9 +42,11 @@ temperature: 0.2
 # requesting tools diverts responses into function calls the bot drops.
 custom_functions: false
 
-# OpenRouter model to use (if provider: openrouter). Must be explicit:
-# there is no safe universal default while routing is unconfigured.
-openrouter_model: openai/gpt-5.2
+# OpenRouter model to use (if provider: openrouter). Defaults to the
+# auto router, which picks a model the key can afford; the served model
+# is logged per run. Pin a specific model (e.g. openai/gpt-5.2) once the
+# key is funded. Verified HTTP 200 on a free-tier key.
+openrouter_model: openrouter/auto
 
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
