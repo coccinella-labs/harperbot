@@ -925,6 +925,13 @@ class TestCheckRunActions(unittest.TestCase):
         _, kwargs = existing.edit.call_args
         self.assertEqual(kwargs["actions"][0]["identifier"], "rerun-analysis")
 
+    def test_action_fields_within_api_limits(self):
+        # The check-runs API caps action descriptions at 40 chars;
+        # exceeding it fails the whole create call with a 422.
+        from harperbot.output import CHECK_RUN_ACTIONS
+        for action in CHECK_RUN_ACTIONS:
+            self.assertLessEqual(len(action["description"]), 40)
+
     def test_at_most_three_actions(self):
         from harperbot.output import CHECK_RUN_ACTIONS
         self.assertLessEqual(len(CHECK_RUN_ACTIONS), 3)

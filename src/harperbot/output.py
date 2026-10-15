@@ -148,7 +148,7 @@ CHECK_RUN_NAME = "HarperBot review"
 # accounts with write access, so no separate author check is needed.
 CHECK_RUN_ACTIONS = [
     {"label": "Re-run analysis",
-     "description": "Run HarperBot analysis again on this commit",
+     "description": "Run HarperBot analysis again",
      "identifier": "rerun-analysis"},
 ]
 
