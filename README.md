@@ -6,7 +6,7 @@
 
 HarperBot is an automated code review tool that uses AI to analyze GitHub pull requests. It integrates with GitHub as a native app and can operate both as a CLI tool for local testing and as a webhook-driven service for automated PR analysis on every push. HarperBot supports multiple AI providers (Gemini, Cerebras, and OpenRouter) and focuses reviews on security, performance, code quality, or all three depending on configuration.
 
-Status: Production-ready. Extracted from the Friday Gemini AI project. Actively maintained.
+Status: Production-ready. Actively maintained.
 
 ## Getting Started
 
