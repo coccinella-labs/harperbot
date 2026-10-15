@@ -1191,6 +1191,27 @@ def find_existing_analysis_comments(pr, bot_login=None):
     return matches
 
 
+def resolve_bot_login(g):
+    """Best-effort identity of the account that posts reviews.
+
+    App installation tokens cannot read GET /user, so the workflow
+    passes HARPERBOT_LOGIN as the app slug plus the [bot] suffix. A
+    personal token resolves through get_user. When identity cannot be
+    established, None is returned and marker matching ignores author,
+    which is the older, weaker behavior, never a wrong filter.
+    """
+    from_env = (os.environ.get("HARPERBOT_LOGIN") or "").strip()
+    if from_env:
+        return from_env
+    try:
+        return g.get_user().login
+    except Exception as e:
+        logging.warning(
+            f"Bot login unresolved ({type(e).__name__}); author checks "
+            "will be skipped.")
+        return None
+
+
 def should_skip_review(pr, head_sha, bot_login=None, force=False):
     """True when a current ok review already covers this SHA.
 
@@ -1517,17 +1538,16 @@ def main():
     pr_details = get_pr_details(github_token, args.repo, args.pr)
 
     # Skip when the current commit already has an ok review, unless forced.
-    # HARPERBOT_FORCE=1 (set by the workflow for /analyze events) always runs.
-    if not args.dry_run:
+    # HARPERBOT_FORCE is set by the workflow for /analyze comment events.
+    forced = os.environ.get("HARPERBOT_FORCE", "").lower() in (
+        "1", "true", "yes")
+    if not args.dry_run and not forced:
         try:
             g = Github(github_token)
             skip_pr = g.get_repo(args.repo).get_pull(pr_details["number"])
-            bot_login = g.get_user().login
             skip, reason = should_skip_review(
                 skip_pr, pr_details.get("head_sha", ""),
-                bot_login=bot_login,
-                force=os.environ.get("HARPERBOT_FORCE", "").lower() in
-                ("1", "true", "yes"))
+                bot_login=resolve_bot_login(g))
             if skip:
                 logging.info(f"Skipping review: {reason}")
                 return

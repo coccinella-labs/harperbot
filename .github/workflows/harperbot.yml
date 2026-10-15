@@ -158,6 +158,9 @@ jobs:
           # Force a fresh review even when the head SHA already has one.
           # Set for /analyze comment events; PR events resolve normally.
           HARPERBOT_FORCE: ${{ github.event_name == 'issue_comment' }}
+          # App installation tokens cannot read GET /user, so the bot
+          # cannot discover its own login. The action knows the slug.
+          HARPERBOT_LOGIN: "${{ steps.app-token.outputs.app-slug }}[bot]"
         run: |
           # Verify installations
           echo "Node.js: $(node --version)"

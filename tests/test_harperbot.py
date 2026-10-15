@@ -1171,5 +1171,35 @@ class TestStickyProtocol(unittest.TestCase):
                                       force=True)
         self.assertFalse(skip)
 
+    def test_login_from_env_uses_no_api_call(self):
+        """Installation tokens cannot read GET /user, so env wins."""
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        env = {"HARPERBOT_LOGIN": "harperbot-knows[bot]"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(resolve_bot_login(g), "harperbot-knows[bot]")
+        g.get_user.assert_not_called()
+
+    def test_login_falls_back_to_get_user(self):
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        g.get_user.return_value.login = "someone-else"
+        with patch.dict(os.environ, {"HARPERBOT_LOGIN": "  "}):
+            self.assertEqual(resolve_bot_login(g), "someone-else")
+
+    def test_login_unknown_returns_none(self):
+        """Unknown identity must not filter, never filter wrongly."""
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        g.get_user.side_effect = Exception("Resource not accessible")
+        with patch.dict(os.environ, {"HARPERBOT_LOGIN": ""}):
+            self.assertIsNone(resolve_bot_login(g))
+
 if __name__ == "__main__":
     unittest.main()
