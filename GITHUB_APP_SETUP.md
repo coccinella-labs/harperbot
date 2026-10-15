@@ -17,8 +17,8 @@ Required for PR comments. Errors with `create-github-app-token` indicate missing
 2. **Generate** private key (.pem) and note App ID.
 
 3. **Add Secrets** in repo Settings → Actions:
-   - `APP_ID`: App ID
-   - `PRIVATE_KEY`: Full .pem content
+   - `HARPER_BOT_APP_ID`: App ID
+   - `HARPER_BOT_PRIVATE_KEY`: Full .pem content
    - `GEMINI_API_KEY`: Existing
    - `CEREBRAS_API_KEY`: New
 

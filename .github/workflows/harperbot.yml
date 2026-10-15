@@ -2,10 +2,12 @@
 # Copyright (c) 2026 coccinella-labs
 
 ---
+name: HarperBot
+
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
     branches: [main]
   issue_comment:
     types: [created]
@@ -15,7 +17,6 @@ on:
 # Package versions
 env:
   GENERATIVE_AI_VERSION: 0.24.1
-  GEMINI_CLI_VERSION: 0.2.2
 
 # Required permissions
 permissions:
@@ -47,7 +48,7 @@ jobs:
       - name: Install Gemini CLI
         run: |
           # Install Node.js dependencies with pinned versions from environment
-          npm install -g @google/genai@latest
+          npm install -g @google/genai@${GENERATIVE_AI_VERSION}
 
           # Create Gemini CLI wrapper with proper module resolution and version fallback
           cat > /usr/local/bin/gemini-wrapper << 'EOL'
@@ -79,9 +80,20 @@ jobs:
   bot:
     name: Bot
     if: |
-      (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-       contains(github.event.comment.body, '/analyze'))
+      (
+        github.event_name == 'pull_request' &&
+        github.actor != 'dependabot[bot]' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      ) ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '/analyze') &&
+        contains(
+          fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+          github.event.comment.author_association
+        )
+      )
     runs-on: ubuntu-latest
     container: python:3.11-slim
     timeout-minutes: 10
@@ -111,7 +123,7 @@ jobs:
         run: |
           # Install Python dependencies
           python -m pip install --upgrade --no-cache-dir \
-            PyGithub python-dotenv PyYAML google-genai cerebras-cloud-sdk
+            PyGithub python-dotenv PyYAML google-genai==2.31.0 cerebras-cloud-sdk==1.91.0 requests
 
           # Verify installations
           python --version
@@ -122,8 +134,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
+          app-id: ${{ secrets.HARPER_BOT_APP_ID || secrets.APP_ID }}
+          private-key: ${{ secrets.HARPER_BOT_PRIVATE_KEY || secrets.PRIVATE_KEY }}
 
       # Run HarperBot to analyze PR with AI (Gemini or Cerebras)
       - name: Run AI PR Bot
@@ -131,6 +143,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           # Verify installations
           echo "Node.js: $(node --version)"

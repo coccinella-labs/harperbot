@@ -16,12 +16,12 @@ focus: all
 provider: gemini
 
 # Gemini model to use (if provider: gemini)
-# Available options: 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash',
-# 'gemini-2.5-flash', 'gemini-2.5-pro'
-# Recommendations: 'gemini-2.0-flash-exp' for fast, cost-effective analysis;
-# 'gemini-2.5-pro-exp' for higher quality but slower responses
+# Available options: 'gemini-3.8-flash' (stable, recommended for reviews),
+# 'gemini-3.6-flash', 'gemini-4-argon' (most capable, higher cost)
+# Note: temperature/top_p/top_k are ignored by Gemini 3.6+ backends;
+# reasoning effort is controlled by thinking_level (low/medium/high)
 # See https://ai.google.dev/models/gemini for the full list and latest models
-model: gemini-2.5-flash
+model: gemini-3.8-flash
 
 # Cerebras model to use (if provider: cerebras)
 # Available options: 'gpt-oss-120b', etc.
@@ -37,9 +37,20 @@ max_diff_length: 4000
 # Lower values (0.0-0.3) for consistent, focused analysis; higher for more creative suggestions.
 temperature: 0.2
 
+# Request custom function tools from the model. Off by default: function
+# calls are never answered yet (no execute-and-send-back loop), and
+# requesting tools diverts responses into function calls the bot drops.
+custom_functions: false
+
+# OpenRouter model to use (if provider: openrouter). Defaults to the
+# auto router, which picks a model the key can afford; the served model
+# is logged per run. Pin a specific model (e.g. openai/gpt-5.2) once the
+# key is funded. Verified HTTP 200 on a free-tier key.
+openrouter_model: openrouter/auto
+
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
-max_output_tokens: 4096
+max_output_tokens: 8192
 
 # Safety settings for AI content filtering
 # Configure thresholds: BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE
