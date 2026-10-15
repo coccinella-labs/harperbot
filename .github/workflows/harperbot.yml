@@ -2,6 +2,8 @@
 # Copyright (c) 2026 coccinella-labs
 
 ---
+name: HarperBot
+
 on:
   workflow_dispatch:
   pull_request:
