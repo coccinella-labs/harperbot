@@ -774,5 +774,70 @@ class TestOutputPhase1(unittest.TestCase):
         self.assertEqual(counts_line([mk("high"), mk("high"), mk("low")]),
                          "2 high · 1 low")
 
+class TestCheckRun(unittest.TestCase):
+    """Check summary, annotations, chunking, conclusions."""
+
+    def test_conclusion_never_failure(self):
+        from harperbot.output import check_conclusion, Finding
+        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        self.assertEqual(check_conclusion([], False), "success")
+        self.assertEqual(check_conclusion([mk("low")], False), "neutral")
+        self.assertEqual(check_conclusion([], True), "neutral")
+        self.assertNotIn("failure", {check_conclusion([], False),
+                                     check_conclusion([mk("high")], False),
+                                     check_conclusion([], True)})
+
+    def test_in_diff_excluded_from_annotations(self):
+        from harperbot.output import (parse_diff_added_lines,
+                                      split_findings_by_diff, Finding)
+        diff = ("+++ b/a.py\n@@ -1,3 +1,4 @@\n x\n+y\n z\n"
+                "+++ b/c.py\n@@ -10,2 +10,3 @@\n p\n+q\n r\n")
+        added = parse_diff_added_lines(diff)
+        in_f = Finding(severity="high", category="bug", path="a.py", line=2,
+                       message="m")
+        out_f = Finding(severity="low", category="style", path="a.py", line=9,
+                        message="m")
+        other_f = Finding(severity="medium", category="perf", path="z.py",
+                          line=1, message="m")
+        in_diff, out = split_findings_by_diff([in_f, out_f, other_f], added)
+        self.assertEqual(in_diff, [in_f])
+        self.assertEqual(out, [out_f, other_f])
+
+    def test_annotation_levels_and_shape(self):
+        from harperbot.output import finding_to_annotation, Finding
+        hi = finding_to_annotation(Finding(severity="critical", category="c",
+                                           path="p", line=5, message="m"))
+        self.assertEqual(hi["annotation_level"], "warning")
+        self.assertEqual((hi["start_line"], hi["end_line"]), (5, 5))
+        lo = finding_to_annotation(Finding(severity="info", category="c",
+                                           path="p", line=None, message="m"))
+        self.assertEqual(lo["annotation_level"], "notice")
+        self.assertEqual(lo["start_line"], 1)
+        self.assertNotIn("error", {hi["annotation_level"],
+                                   lo["annotation_level"]})
+
+    def test_chunking_at_fifty(self):
+        from harperbot.output import chunk_annotations
+        anns = [{"n": i} for i in range(51)]
+        chunks = chunk_annotations(anns)
+        self.assertEqual([len(c) for c in chunks], [50, 1])
+        self.assertEqual(chunk_annotations([]), [])
+
+    def test_check_summary_shape(self):
+        from harperbot.output import build_check_summary, Finding
+        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        body = build_check_summary(commit_sha="abc1234", model="m",
+                                   findings=[mk("high")],
+                                   analysis="analysis text here")
+        self.assertIn("abc1234", body)
+        self.assertIn("1 high", body)
+        self.assertIn("<details>", body)
+        self.assertIn("analysis text here", body)
+
+    def test_diff_parser_ranges(self):
+        from harperbot.output import parse_diff_added_lines
+        diff = "+++ b/a.py\n@@ -1,3 +10,4 @@\n x\n+y\n+z\n w\n"
+        self.assertEqual(parse_diff_added_lines(diff), {"a.py": [(11, 12)]})
+
 if __name__ == "__main__":
     unittest.main()

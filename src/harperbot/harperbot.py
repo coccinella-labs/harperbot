@@ -1185,7 +1185,8 @@ def upsert_analysis_comment(pr, formatted_comment):
             logging.warning(f"Could not delete stale analysis comment: {e}")
 
 
-def build_review_comment(analysis, pr_details, repo_name, config):
+def build_review_comment(analysis, pr_details, repo_name, config,
+                         check_url=None):
     """Assemble the sticky review comment through one pipeline.
 
     Returns (body, ok). ok=False means the findings block was missing
@@ -1201,10 +1202,11 @@ def build_review_comment(analysis, pr_details, repo_name, config):
         return _output.format_review_comment(
             analysis=analysis, findings=findings, commit_sha=commit_sha,
             commit_url=commit_url, model=model, run_url=run_url,
-            focus=focus), True
+            focus=focus, check_url=check_url), True
     return _output.format_fallback_comment(
         analysis=analysis, commit_sha=commit_sha, commit_url=commit_url,
-        model=model, run_url=run_url, focus=focus), False
+        model=model, run_url=run_url, focus=focus,
+        check_url=check_url), False
 
 
 def record_failure(pr, attempted_sha, run_url):
@@ -1219,6 +1221,55 @@ def record_failure(pr, attempted_sha, run_url):
     pr.create_issue_comment(_output.format_failure_notice(
         attempted_sha=attempted_sha, run_url=run_url))
     logging.info("Posted failure notice (no prior review)")
+
+
+def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations,
+                     run_url=None):
+    """Create or update the HarperBot review check run.
+
+    Conclusion is success or neutral, never failure: a red X must mean
+    a bot bug (which fails the Actions job instead), not review output.
+    One run per head SHA, updated never recreated; annotations go in
+    50-per-request batches.
+    """
+    assert conclusion in ("success", "neutral"), conclusion
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    commit = repo.get_commit(head_sha)
+    existing = None
+    for run in commit.get_check_runs(check_name=_output.CHECK_RUN_NAME):
+        existing = run
+        break
+    chunks = _output.chunk_annotations(annotations)
+    first = chunks[0] if chunks else []
+    output = {"title": "HarperBot review", "summary": summary,
+              "annotations": first}
+    if existing is None:
+        check = repo.create_check_run(
+            _output.CHECK_RUN_NAME, head_sha, status="completed",
+            started_at=now, completed_at=now, conclusion=conclusion,
+            details_url=run_url, output=output)
+    else:
+        existing.edit(status="completed", started_at=now, completed_at=now,
+                       conclusion=conclusion, details_url=run_url,
+                       output=output)
+        check = existing
+    for extra in chunks[1:]:
+        check.edit(output={"title": "HarperBot review", "summary": summary,
+                           "annotations": extra})
+    logging.info(f"Check run {conclusion} for {head_sha[:7]} "
+                 f"({len(annotations)} annotations)")
+    return check.html_url
+
+
+def record_check_failure(repo, head_sha, notice, run_url):
+    """Neutral check run carrying the failure notice. Never failure."""
+    try:
+        upsert_check_run(repo, head_sha, summary=notice,
+                         conclusion="neutral", annotations=[],
+                         run_url=run_url)
+    except Exception as e:
+        logging.warning(f"Could not record check failure: {e}")
 
 
 def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, analysis: str):
@@ -1238,9 +1289,24 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
         suggestions = parse_code_suggestions(analysis)
         main_comment = update_main_comment(analysis)
 
+        # Check run first, so the sticky footer can link to it.
+        commit_sha = pr_details.get("head_sha", "")
+        model = pr_details.get("model_name") or config.get("model", "?")
+        _, findings, ok = _output.parse_findings(main_comment)
+        added = _output.parse_diff_added_lines(pr_details.get("diff", ""))
+        _, out_of_diff = _output.split_findings_by_diff(findings, added)
+        annotations = [_output.finding_to_annotation(f) for f in out_of_diff]
+        check_url = upsert_check_run(
+            repo, commit_sha,
+            summary=_output.build_check_summary(
+                commit_sha=commit_sha, model=model, findings=findings,
+                analysis=main_comment),
+            conclusion=_output.check_conclusion(findings, failed=False),
+            annotations=annotations, run_url=workflow_run_url())
+
         # Upsert the main analysis comment: one comment per PR.
         formatted_comment, _ = build_review_comment(
-            main_comment, pr_details, repo_name, config)
+            main_comment, pr_details, repo_name, config, check_url=check_url)
         upsert_analysis_comment(pr, formatted_comment)
 
         # Post or save inline suggestions based on config
@@ -1358,6 +1424,9 @@ def main():
             pr = repo.get_pull(pr_details["number"])
             record_failure(pr, pr_details.get("head_sha", ""),
                            workflow_run_url())
+            record_check_failure(
+                repo, pr_details.get("head_sha", ""), notice,
+                workflow_run_url())
         except Exception as post_e:
             logging.error(f"Failed to post error notice: {post_e}")
         sys.exit(1)
