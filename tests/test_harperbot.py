@@ -16,11 +16,11 @@ from harperbot.harperbot import (  # noqa: E402
     BotInternalError,
     analyze_with_gemini,
     apply_suggestions_to_pr,
+    classify_provider_error,
     create_branch,
     find_diff_position,
-    load_config,
     find_existing_analysis_comments,
-    classify_provider_error,
+    load_config,
     parse_diff_for_suggestions,
     upsert_analysis_comment,
     verify_webhook_signature,
@@ -113,15 +113,13 @@ class TestHarperBot(unittest.TestCase):
         """Test finding position in diff hunk."""
         import textwrap
 
-        diff = textwrap.dedent(
-            """\
+        diff = textwrap.dedent("""\
             diff --git a/test.py b/test.py
             @@ -1,3 +1,3 @@
              old line 1
             -old line 2
             +new line 2
-             old line 3"""
-        ).strip()
+             old line 3""").strip()
         position = find_diff_position(diff, "test.py", 2)
         self.assertEqual(position, 3)
 
@@ -244,7 +242,6 @@ class TestHarperBot(unittest.TestCase):
         # Should not create commit since suggestion is skipped
         self.assertFalse(mock_repo.create_git_commit.called)
 
-
     def _comment(self, body):
         c = Mock()
         c.body = body
@@ -267,8 +264,7 @@ class TestHarperBot(unittest.TestCase):
         old.edit.assert_called_once_with("new body")
 
     def test_upsert_adopts_legacy_comment(self):
-        legacy = self._comment("<summary>HarperBot Analysis</summary> "
-                               "harperbot/actions/workflows stuff")
+        legacy = self._comment("<summary>HarperBot Analysis</summary> " "harperbot/actions/workflows stuff")
         pr = Mock()
         pr.number = 1
         pr.get_issue_comments.return_value = [legacy]
@@ -292,6 +288,7 @@ class TestErrorHandling(unittest.TestCase):
 
     def _api_error(self, code):
         from google.genai import errors
+
         return errors.APIError(code, "resp", {"error": {"message": "m"}})
 
     def test_auth_codes_map_to_auth_message(self):
@@ -324,16 +321,21 @@ class TestErrorHandling(unittest.TestCase):
             pass
 
         request = Mock()
-        for err in (APITimeoutError(request=request),
-                    APIConnectionError(request=request),
-                    FakeTimeout("t"), ConnectionResetError("c")):
+        for err in (
+            APITimeoutError(request=request),
+            APIConnectionError(request=request),
+            FakeTimeout("t"),
+            ConnectionResetError("c"),
+        ):
             msg = classify_provider_error(err, "")
             self.assertIn("temporarily unreachable", msg)
 
     def test_httpx_protocol_error_is_transient(self):
         """A mid-response disconnect is transport, not a bot bug."""
-        import httpx
         from unittest.mock import Mock
+
+        import httpx
+
         err = httpx.RemoteProtocolError("gone", request=Mock())
         msg = classify_provider_error(err, "")
         self.assertIn("temporarily unreachable", msg)
@@ -346,17 +348,15 @@ class TestErrorHandling(unittest.TestCase):
     def test_missing_key_names_variable_not_value(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CEREBRAS_API_KEY", None)
-            with patch("harperbot.harperbot.load_config",
-                       return_value={"provider": "cerebras"}):
-                msg = analyze_with_gemini(
-                    Mock(), {"diff": "", "files_changed": [], "title": "t"})
+            with patch("harperbot.harperbot.load_config", return_value={"provider": "cerebras"}):
+                msg = analyze_with_gemini(Mock(), {"diff": "", "files_changed": [], "title": "t"})
                 self.assertIn("CEREBRAS_API_KEY is not set", msg)
                 self.assertNotIn("sk-", msg)
 
     def test_tools_request_shape_constructs(self):
         from google.genai import types
-        tools = [types.Tool(function_declarations=[
-            types.FunctionDeclaration(name="f", description="d")])]
+
+        tools = [types.Tool(function_declarations=[types.FunctionDeclaration(name="f", description="d")])]
         cfg = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(thinking_level="medium"),
             max_output_tokens=100,
@@ -365,11 +365,8 @@ class TestErrorHandling(unittest.TestCase):
         self.assertEqual(cfg.thinking_config.thinking_level, "MEDIUM")
 
     def test_run_url_present_and_absent(self):
-        with patch.dict(os.environ, {"GITHUB_SERVER_URL": "https://g.io",
-                                     "GITHUB_REPOSITORY": "o/r",
-                                     "GITHUB_RUN_ID": "1"}):
-            self.assertEqual(workflow_run_url(),
-                             "https://g.io/o/r/actions/runs/1")
+        with patch.dict(os.environ, {"GITHUB_SERVER_URL": "https://g.io", "GITHUB_REPOSITORY": "o/r", "GITHUB_RUN_ID": "1"}):
+            self.assertEqual(workflow_run_url(), "https://g.io/o/r/actions/runs/1")
         with patch.dict(os.environ, {}, clear=False):
             for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"):
                 os.environ.pop(k, None)
@@ -379,11 +376,19 @@ class TestErrorHandling(unittest.TestCase):
         """With custom_functions off, the request carries no tools."""
         from unittest.mock import Mock
         from unittest.mock import patch as _patch
-        with _patch("harperbot.harperbot.load_config", return_value={
-                "provider": "gemini", "model": "m", "focus": "all",
-                "max_diff_length": 4000, "max_output_tokens": 100,
+
+        with _patch(
+            "harperbot.harperbot.load_config",
+            return_value={
+                "provider": "gemini",
+                "model": "m",
+                "focus": "all",
+                "max_diff_length": 4000,
+                "max_output_tokens": 100,
                 "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
-                "custom_functions": False}):
+                "custom_functions": False,
+            },
+        ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
                 client = Mock()
                 resp = Mock()
@@ -391,8 +396,8 @@ class TestErrorHandling(unittest.TestCase):
                 resp.candidates = None
                 client.models.generate_content.return_value = resp
                 from harperbot.harperbot import analyze_with_gemini
-                out = analyze_with_gemini(
-                    client, {"diff": "d", "files_changed": ["f"], "title": "t"})
+
+                out = analyze_with_gemini(client, {"diff": "d", "files_changed": ["f"], "title": "t"})
                 self.assertEqual(out, "done")
                 cfg = client.models.generate_content.call_args[1]["config"]
                 self.assertIsNone(cfg.tools)
@@ -402,26 +407,31 @@ class TestErrorHandling(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import Mock
         from unittest.mock import patch as _patch
-        part = SimpleNamespace(text=None,
-                               function_call=SimpleNamespace(name="check_python_syntax"))
-        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]),
-                               finish_reason="STOP")
+
+        part = SimpleNamespace(text=None, function_call=SimpleNamespace(name="check_python_syntax"))
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]), finish_reason="STOP")
         mock_client = Mock()
         mock_resp = Mock()
         mock_resp.text = None
         mock_resp.candidates = [cand]
         mock_client.models.generate_content.return_value = mock_resp
-        with _patch("harperbot.harperbot.load_config", return_value={
-                "provider": "gemini", "model": "m", "focus": "all",
-                "max_diff_length": 4000, "max_output_tokens": 100,
+        with _patch(
+            "harperbot.harperbot.load_config",
+            return_value={
+                "provider": "gemini",
+                "model": "m",
+                "focus": "all",
+                "max_diff_length": 4000,
+                "max_output_tokens": 100,
                 "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
-                "custom_functions": False}):
+                "custom_functions": False,
+            },
+        ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
+
                 try:
-                    analyze_with_gemini(
-                        mock_client, {"diff": "d", "files_changed": ["f"],
-                                      "title": "t"})
+                    analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
                     self.fail("expected BotInternalError")
                 except BotInternalError as e:
                     self.assertIn("function_call", e.public_message)
@@ -432,25 +442,31 @@ class TestErrorHandling(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import Mock
         from unittest.mock import patch as _patch
+
         part = SimpleNamespace(text=None, function_call=None)
-        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]),
-                               finish_reason="STOP")
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]), finish_reason="STOP")
         mock_client = Mock()
         mock_resp = Mock()
         mock_resp.text = None
         mock_resp.candidates = [cand]
         mock_client.models.generate_content.return_value = mock_resp
-        with _patch("harperbot.harperbot.load_config", return_value={
-                "provider": "gemini", "model": "m", "focus": "all",
-                "max_diff_length": 4000, "max_output_tokens": 100,
+        with _patch(
+            "harperbot.harperbot.load_config",
+            return_value={
+                "provider": "gemini",
+                "model": "m",
+                "focus": "all",
+                "max_diff_length": 4000,
+                "max_output_tokens": 100,
                 "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
-                "custom_functions": False}):
+                "custom_functions": False,
+            },
+        ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
+
                 try:
-                    analyze_with_gemini(
-                        mock_client, {"diff": "d", "files_changed": ["f"],
-                                      "title": "t"})
+                    analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
                     self.fail("expected BotInternalError")
                 except BotInternalError as e:
                     self.assertIn("other", e.public_message)
@@ -461,25 +477,31 @@ class TestErrorHandling(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import Mock
         from unittest.mock import patch as _patch
-        cand = SimpleNamespace(content=SimpleNamespace(parts=[]),
-                               finish_reason="OTHER")
+
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[]), finish_reason="OTHER")
         mock_client = Mock()
         mock_resp = Mock()
         mock_resp.text = None
         mock_resp.candidates = [cand]
         mock_resp.prompt_feedback = SimpleNamespace(block_reason="SAFETY")
         mock_client.models.generate_content.return_value = mock_resp
-        with _patch("harperbot.harperbot.load_config", return_value={
-                "provider": "gemini", "model": "m", "focus": "all",
-                "max_diff_length": 4000, "max_output_tokens": 100,
+        with _patch(
+            "harperbot.harperbot.load_config",
+            return_value={
+                "provider": "gemini",
+                "model": "m",
+                "focus": "all",
+                "max_diff_length": 4000,
+                "max_output_tokens": 100,
                 "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
-                "custom_functions": False}):
+                "custom_functions": False,
+            },
+        ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
+
                 try:
-                    analyze_with_gemini(
-                        mock_client, {"diff": "d", "files_changed": ["f"],
-                                      "title": "t"})
+                    analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
                     self.fail("expected BotInternalError")
                 except BotInternalError as e:
                     self.assertIn("SAFETY", e.public_message)
@@ -487,9 +509,12 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_gemini_shape(self):
         """Gemini usage object logs all counts including thinking tokens."""
         from types import SimpleNamespace
+
         from harperbot.harperbot import log_api_usage
-        usage = SimpleNamespace(prompt_token_count=100, candidates_token_count=20,
-                                thoughts_token_count=3000, total_token_count=3120)
+
+        usage = SimpleNamespace(
+            prompt_token_count=100, candidates_token_count=20, thoughts_token_count=3000, total_token_count=3120
+        )
         cand = SimpleNamespace(finish_reason="MAX_TOKENS")
         resp = SimpleNamespace(usage_metadata=usage, candidates=[cand])
         with self.assertLogs(level="INFO") as cm:
@@ -502,9 +527,10 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_openai_shape(self):
         """Cerebras/OpenAI usage object: prompt/completion/total tokens."""
         from types import SimpleNamespace
+
         from harperbot.harperbot import log_api_usage
-        usage = SimpleNamespace(prompt_tokens=50, completion_tokens=10,
-                                total_tokens=60)
+
+        usage = SimpleNamespace(prompt_tokens=50, completion_tokens=10, total_tokens=60)
         choice = SimpleNamespace(finish_reason="stop")
         resp = SimpleNamespace(usage=usage, choices=[choice])
         with self.assertLogs(level="INFO") as cm:
@@ -516,17 +542,23 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_never_fails(self):
         """Absent or hostile shapes degrade to Nones, never raise."""
         from unittest.mock import Mock
+
         from harperbot.harperbot import log_api_usage
+
         log_api_usage(None, "m", "gemini")
         log_api_usage(Mock(), "m", "gemini")
         log_api_usage(object(), "m", "gemini")
+
+
 class TestOpenRouterProvider(unittest.TestCase):
     """OpenRouter branch: no network, requests.post mocked."""
 
     def _config(self):
         return {
-            "provider": "openrouter", "focus": "all",
-            "max_diff_length": 4000, "max_output_tokens": 100,
+            "provider": "openrouter",
+            "focus": "all",
+            "max_diff_length": 4000,
+            "max_output_tokens": 100,
             "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
         }
 
@@ -538,20 +570,20 @@ class TestOpenRouterProvider(unittest.TestCase):
             os.environ.pop("OPENROUTER_API_KEY", None)
             with patch("harperbot.harperbot.load_config", return_value=self._config()):
                 from harperbot.harperbot import analyze_with_gemini
+
                 msg = analyze_with_gemini(Mock(), self._details())
                 self.assertIn("OPENROUTER_API_KEY is not set", msg)
 
     def test_success_returns_text_and_logs_resolved_model(self):
-        import requests
+
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._config()):
                 with patch("harperbot.harperbot.requests.post") as mp:
                     resp = Mock()
-                    resp.json.return_value = {
-                        "model": "openai/gpt-5.2",
-                        "choices": [{"message": {"content": "looks good"}}]}
+                    resp.json.return_value = {"model": "openai/gpt-5.2", "choices": [{"message": {"content": "looks good"}}]}
                     mp.return_value = resp
                     from harperbot.harperbot import analyze_with_gemini
+
                     out = analyze_with_gemini(Mock(), self._details())
                     self.assertEqual(out, "looks good")
                     body = mp.call_args[1]["json"]
@@ -560,6 +592,7 @@ class TestOpenRouterProvider(unittest.TestCase):
 
     def test_auth_failure_maps_to_auth_message(self):
         import requests
+
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._config()):
                 with patch("harperbot.harperbot.requests.post") as mp:
@@ -567,25 +600,32 @@ class TestOpenRouterProvider(unittest.TestCase):
                     err_resp.status_code = 401
                     mp.side_effect = requests.HTTPError(response=err_resp)
                     from harperbot.harperbot import analyze_with_gemini
+
                     msg = analyze_with_gemini(Mock(), self._details())
                     self.assertIn("Invalid API key or authentication failed", msg)
                     self.assertIn("openrouter", msg)
+
 
 class TestOpenRouterFallback(unittest.TestCase):
     """Gemini primary with OpenRouter fallback on traffic errors."""
 
     def _503(self):
         from google.genai import errors
+
         return errors.APIError(503, "resp", {"error": {"message": "x"}})
 
     def _401(self):
         from google.genai import errors
+
         return errors.APIError(401, "resp", {"error": {"message": "x"}})
 
     def _gemini_config(self):
         return {
-            "provider": "gemini", "model": "gemini-3.8-flash", "focus": "all",
-            "max_diff_length": 4000, "max_output_tokens": 100,
+            "provider": "gemini",
+            "model": "gemini-3.8-flash",
+            "focus": "all",
+            "max_diff_length": 4000,
+            "max_output_tokens": 100,
             "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
             "openrouter_model": "openrouter/auto",
         }
@@ -594,29 +634,30 @@ class TestOpenRouterFallback(unittest.TestCase):
         return {"diff": "d", "files_changed": ["f"], "title": "t"}
 
     def test_fallback_returns_openrouter_text(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
-                                     "OPENROUTER_API_KEY": "k"}):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k", "OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._gemini_config()):
                 with patch("harperbot.harperbot.requests.post") as mp:
                     resp = Mock()
                     resp.json.return_value = {
                         "model": "deepseek/deepseek-v4.1-flash",
-                        "choices": [{"message": {"content": "fallback review"}}]}
+                        "choices": [{"message": {"content": "fallback review"}}],
+                    }
                     mp.return_value = resp
                     client = Mock()
                     client.models.generate_content.side_effect = self._503()
                     from harperbot.harperbot import analyze_with_gemini
+
                     out = analyze_with_gemini(client, self._details())
                     self.assertEqual(out, "fallback review")
 
     def test_auth_error_does_not_fallback(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
-                                     "OPENROUTER_API_KEY": "k"}):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k", "OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._gemini_config()):
                 with patch("harperbot.harperbot.requests.post") as mp:
                     client = Mock()
                     client.models.generate_content.side_effect = self._401()
                     from harperbot.harperbot import analyze_with_gemini
+
                     msg = analyze_with_gemini(client, self._details())
                     self.assertIn("Invalid API key", msg)
                     mp.assert_not_called()
@@ -629,14 +670,15 @@ class TestOpenRouterFallback(unittest.TestCase):
                     client = Mock()
                     client.models.generate_content.side_effect = self._503()
                     from harperbot.harperbot import analyze_with_gemini
+
                     msg = analyze_with_gemini(client, self._details())
                     self.assertIn("API unavailable", msg)
                     mp.assert_not_called()
 
     def test_double_failure_names_both(self):
         import requests
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
-                                     "OPENROUTER_API_KEY": "k"}):
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k", "OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._gemini_config()):
                 with patch("harperbot.harperbot.requests.post") as mp:
                     err_resp = Mock()
@@ -645,34 +687,41 @@ class TestOpenRouterFallback(unittest.TestCase):
                     client = Mock()
                     client.models.generate_content.side_effect = self._503()
                     from harperbot.harperbot import analyze_with_gemini
+
                     msg = analyze_with_gemini(client, self._details())
                     self.assertIn("both failed", msg)
+
 
 class TestOutputPhase1(unittest.TestCase):
     """Structured findings, sanitization, chrome, marker protocol."""
 
-    KW = dict(commit_sha="abc1234def", commit_url="https://github.com/o/r/commit/abc1234def",
-              model="gemini-3.8-flash", run_url="https://g.io/o/r/actions/runs/1")
+    KW = dict(
+        commit_sha="abc1234def",
+        commit_url="https://github.com/o/r/commit/abc1234def",
+        model="gemini-3.8-flash",
+        run_url="https://g.io/o/r/actions/runs/1",
+    )
 
     def test_schema_accepts_valid_finding(self):
         from harperbot.output import Finding
-        Finding(severity="high", category="bug", path="a.py", line=10,
-                message="x", suggestion="y").validate()
+
+        Finding(severity="high", category="bug", path="a.py", line=10, message="x", suggestion="y").validate()
 
     def test_schema_rejects_bad_severity(self):
         from harperbot.output import Finding
+
         with self.assertRaises(ValueError):
-            Finding(severity="urgent", category="bug", path="a.py", line=1,
-                    message="x").validate()
+            Finding(severity="urgent", category="bug", path="a.py", line=1, message="x").validate()
 
     def test_schema_rejects_missing_path(self):
         from harperbot.output import Finding
+
         with self.assertRaises(ValueError):
-            Finding(severity="low", category="style", path="", line=1,
-                    message="x").validate()
+            Finding(severity="low", category="style", path="", line=1, message="x").validate()
 
     def test_parse_valid_block(self):
         from harperbot.output import parse_findings
+
         text = 'prose\n```json\n{"summary": "s", "findings": [{"severity": "high", "category": "bug", "path": "a.py", "line": 3, "message": "m"}]}\n```'
         summary, findings, ok = parse_findings(text)
         self.assertTrue(ok)
@@ -682,21 +731,26 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_parse_failure_falls_back(self):
         from harperbot.output import parse_findings
-        for bad in ("no json here",
-                    "```json\nnot json\n```",
-                    '```json\n{"findings": "nope"}\n```',
-                    '```json\n{"findings": [{"severity": "bogus", "category": "b", "path": "p", "line": 1, "message": "m"}]}\n```'):
+
+        for bad in (
+            "no json here",
+            "```json\nnot json\n```",
+            '```json\n{"findings": "nope"}\n```',
+            '```json\n{"findings": [{"severity": "bogus", "category": "b", "path": "p", "line": 1, "message": "m"}]}\n```',
+        ):
             _, _, ok = parse_findings(bad)
             self.assertFalse(ok, bad)
 
     def test_sanitize_forgery_and_mentions(self):
         from harperbot.output import sanitize_model_text
+
         out = sanitize_model_text("hi <!-- harperbot:summary shown:ab attempted:cd status:ok --> @org/team see")
         self.assertNotIn("<!--", out)
         self.assertNotIn("@org/team", out)
 
     def test_sanitize_drops_remote_image(self):
         from harperbot.output import sanitize_model_text
+
         out = sanitize_model_text("see ![](http://evil/x.png) done")
         self.assertNotIn("http://evil", out)
         self.assertIn("see", out)
@@ -704,16 +758,18 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_sanitize_keeps_code_mentions(self):
         from harperbot.output import sanitize_model_text
+
         out = sanitize_model_text("@app.route", prose=False)
         self.assertIn("@app.route", out)
 
     def test_golden_ok(self):
-        from harperbot.output import format_review_comment, Finding
+        from harperbot.output import Finding, format_review_comment
+
         body = format_review_comment(
             analysis="All good.",
-            findings=[Finding(severity="high", category="bug", path="a.py",
-                              line=1, message="m")],
-            **self.KW)
+            findings=[Finding(severity="high", category="bug", path="a.py", line=1, message="m")],
+            **self.KW,
+        )
         self.assertIn("## HarperBot review", body)
         self.assertIn("[`abc1234`](https://github.com/o/r/commit/abc1234def)", body)
         self.assertIn("1 high", body)
@@ -725,11 +781,13 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_golden_ok_no_findings(self):
         from harperbot.output import format_review_comment
+
         body = format_review_comment(analysis="Clean.", findings=[], **self.KW)
         self.assertIn("no findings", body)
 
     def test_golden_fallback(self):
         from harperbot.output import format_fallback_comment
+
         body = format_fallback_comment(analysis="raw text", **self.KW)
         self.assertIn("Structured findings unavailable", body)
         self.assertIn("<details>", body)
@@ -737,8 +795,8 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_golden_failed_none(self):
         from harperbot.output import format_failure_notice
-        body = format_failure_notice(attempted_sha="abc1234def",
-                                     run_url="https://g.io/o/r/actions/runs/1")
+
+        body = format_failure_notice(attempted_sha="abc1234def", run_url="https://g.io/o/r/actions/runs/1")
         self.assertNotIn("HarperBot review", body)
         self.assertNotIn("<details>", body)
         self.assertIn("abc1234", body)
@@ -746,11 +804,13 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_banner_updates_only_banner_and_marker(self):
         from harperbot.output import apply_failure_banner
-        prior = ("## HarperBot review\n\nReviewed [`abc`](u) · m · 1 high\n\n"
-                 "Body text here.\n\n<sub>x</sub>\n\n"
-                 "<!-- harperbot:summary shown:abc1234 attempted:abc1234 status:ok -->")
-        out = apply_failure_banner(body=prior, attempted_sha="def4567",
-                                   run_url="https://g.io/r")
+
+        prior = (
+            "## HarperBot review\n\nReviewed [`abc`](u) · m · 1 high\n\n"
+            "Body text here.\n\n<sub>x</sub>\n\n"
+            "<!-- harperbot:summary shown:abc1234 attempted:abc1234 status:ok -->"
+        )
+        out = apply_failure_banner(body=prior, attempted_sha="def4567", run_url="https://g.io/r")
         self.assertIn("Body text here.", out)
         self.assertIn("Last run failed on `def4567`", out)
         self.assertIn("status:failed", out)
@@ -759,6 +819,7 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_marker_round_trip_last_wins(self):
         from harperbot.output import parse_marker, render_marker
+
         forged = render_marker("aaaabbbb", "aaaabbbb", "ok")
         real = render_marker("bbbbcccc", "ccccdddd", "failed")
         parsed = parse_marker(forged + "\n" + real)
@@ -768,67 +829,69 @@ class TestOutputPhase1(unittest.TestCase):
         self.assertIsNone(parse_marker("no marker here"))
 
     def test_counts_line(self):
-        from harperbot.output import counts_line, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        from harperbot.output import Finding, counts_line
+
+        def mk(severity):
+            return Finding(severity=severity, category="c", path="p", line=1, message="m")
+
         self.assertEqual(counts_line([]), "no findings")
-        self.assertEqual(counts_line([mk("high"), mk("high"), mk("low")]),
-                         "2 high · 1 low")
+        self.assertEqual(counts_line([mk("high"), mk("high"), mk("low")]), "2 high · 1 low")
+
 
 class TestCheckRun(unittest.TestCase):
     """Check summary, annotations, chunking, conclusions."""
 
     def test_conclusion_never_failure(self):
-        from harperbot.output import check_conclusion, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        from harperbot.output import Finding, check_conclusion
+
+        def mk(severity):
+            return Finding(severity=severity, category="c", path="p", line=1, message="m")
+
         self.assertEqual(check_conclusion([], False), "success")
         self.assertEqual(check_conclusion([mk("low")], False), "neutral")
         self.assertEqual(check_conclusion([], True), "neutral")
-        self.assertNotIn("failure", {check_conclusion([], False),
-                                     check_conclusion([mk("high")], False),
-                                     check_conclusion([], True)})
+        self.assertNotIn(
+            "failure", {check_conclusion([], False), check_conclusion([mk("high")], False), check_conclusion([], True)}
+        )
 
     def test_in_diff_excluded_from_annotations(self):
-        from harperbot.output import (parse_diff_added_lines,
-                                      split_findings_by_diff, Finding)
-        diff = ("+++ b/a.py\n@@ -1,3 +1,4 @@\n x\n+y\n z\n"
-                "+++ b/c.py\n@@ -10,2 +10,3 @@\n p\n+q\n r\n")
+        from harperbot.output import Finding, parse_diff_added_lines, split_findings_by_diff
+
+        diff = "+++ b/a.py\n@@ -1,3 +1,4 @@\n x\n+y\n z\n" "+++ b/c.py\n@@ -10,2 +10,3 @@\n p\n+q\n r\n"
         added = parse_diff_added_lines(diff)
-        in_f = Finding(severity="high", category="bug", path="a.py", line=2,
-                       message="m")
-        out_f = Finding(severity="low", category="style", path="a.py", line=9,
-                        message="m")
-        other_f = Finding(severity="medium", category="perf", path="z.py",
-                          line=1, message="m")
+        in_f = Finding(severity="high", category="bug", path="a.py", line=2, message="m")
+        out_f = Finding(severity="low", category="style", path="a.py", line=9, message="m")
+        other_f = Finding(severity="medium", category="perf", path="z.py", line=1, message="m")
         in_diff, out = split_findings_by_diff([in_f, out_f, other_f], added)
         self.assertEqual(in_diff, [in_f])
         self.assertEqual(out, [out_f, other_f])
 
     def test_annotation_levels_and_shape(self):
-        from harperbot.output import finding_to_annotation, Finding
-        hi = finding_to_annotation(Finding(severity="critical", category="c",
-                                           path="p", line=5, message="m"))
+        from harperbot.output import Finding, finding_to_annotation
+
+        hi = finding_to_annotation(Finding(severity="critical", category="c", path="p", line=5, message="m"))
         self.assertEqual(hi["annotation_level"], "warning")
         self.assertEqual((hi["start_line"], hi["end_line"]), (5, 5))
-        lo = finding_to_annotation(Finding(severity="info", category="c",
-                                           path="p", line=None, message="m"))
+        lo = finding_to_annotation(Finding(severity="info", category="c", path="p", line=None, message="m"))
         self.assertEqual(lo["annotation_level"], "notice")
         self.assertEqual(lo["start_line"], 1)
-        self.assertNotIn("error", {hi["annotation_level"],
-                                   lo["annotation_level"]})
+        self.assertNotIn("error", {hi["annotation_level"], lo["annotation_level"]})
 
     def test_chunking_at_fifty(self):
         from harperbot.output import chunk_annotations
+
         anns = [{"n": i} for i in range(51)]
         chunks = chunk_annotations(anns)
         self.assertEqual([len(c) for c in chunks], [50, 1])
         self.assertEqual(chunk_annotations([]), [])
 
     def test_check_summary_shape(self):
-        from harperbot.output import build_check_summary, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
-        body = build_check_summary(commit_sha="abc1234", model="m",
-                                   findings=[mk("high")],
-                                   analysis="analysis text here")
+        from harperbot.output import Finding, build_check_summary
+
+        def mk(severity):
+            return Finding(severity=severity, category="c", path="p", line=1, message="m")
+
+        body = build_check_summary(commit_sha="abc1234", model="m", findings=[mk("high")], analysis="analysis text here")
         self.assertIn("abc1234", body)
         self.assertIn("1 high", body)
         self.assertIn("<details>", body)
@@ -836,51 +899,60 @@ class TestCheckRun(unittest.TestCase):
 
     def test_diff_parser_ranges(self):
         from harperbot.output import parse_diff_added_lines
+
         diff = "+++ b/a.py\n@@ -1,3 +10,4 @@\n x\n+y\n+z\n w\n"
         self.assertEqual(parse_diff_added_lines(diff), {"a.py": [(11, 12)]})
+
 
 class TestReviewPostingFlag(unittest.TestCase):
     """Inline review posting stays off unless explicitly enabled."""
 
     def _analysis_with_suggestion(self):
-        return ("text\n```diff\n--- a/f.py\n+++ b/f.py\n"
-                "@@ -1 +1 @@\n-old\n+new\n```")
+        return "text\n```diff\n--- a/f.py\n+++ b/f.py\n" "@@ -1 +1 @@\n-old\n+new\n```"
 
     def _pr(self):
         from unittest.mock import Mock
+
         pr = Mock()
         pr.number = 1
         pr.get_issue_comments.return_value = []
         return pr
 
     def test_flag_off_skips_both_paths(self):
-        from unittest.mock import Mock, patch
+        from unittest.mock import patch
+
         from harperbot.harperbot import post_comment_webhook
-        with patch("harperbot.harperbot.load_config",
-                   return_value={"focus": "all", "model": "m",
-                                 "post_inline_reviews": False,
-                                 "post_suggestions_in_yaml": True}):
-            with patch("harperbot.harperbot.save_inline_suggestions") as sv, \
-                 patch("harperbot.harperbot.post_inline_suggestions") as ps:
+
+        with patch(
+            "harperbot.harperbot.load_config",
+            return_value={"focus": "all", "model": "m", "post_inline_reviews": False, "post_suggestions_in_yaml": True},
+        ):
+            with (
+                patch("harperbot.harperbot.save_inline_suggestions") as sv,
+                patch("harperbot.harperbot.post_inline_suggestions") as ps,
+            ):
                 with patch("harperbot.harperbot.Github") as gh:
                     repo = gh.return_value.get_repo.return_value
                     repo.get_commit.return_value.get_check_runs.return_value = []
                     repo.get_pull.return_value.get_issue_comments.return_value = []
                     post_comment_webhook(
-                    "tok", "o/r",
-                        {"number": 1, "head_sha": "abc1234", "diff": "",
-                         "model_name": "m"},
-                        self._analysis_with_suggestion())
+                        "tok",
+                        "o/r",
+                        {"number": 1, "head_sha": "abc1234", "diff": "", "model_name": "m"},
+                        self._analysis_with_suggestion(),
+                    )
                     sv.assert_not_called()
                     ps.assert_not_called()
 
     def test_flag_on_preserves_existing_routing(self):
-        from unittest.mock import Mock, patch
+        from unittest.mock import patch
+
         from harperbot.harperbot import post_comment_webhook
-        with patch("harperbot.harperbot.load_config",
-                   return_value={"focus": "all", "model": "m",
-                                 "post_inline_reviews": True,
-                                 "post_suggestions_in_yaml": True}):
+
+        with patch(
+            "harperbot.harperbot.load_config",
+            return_value={"focus": "all", "model": "m", "post_inline_reviews": True, "post_suggestions_in_yaml": True},
+        ):
             with patch("harperbot.harperbot.save_inline_suggestions") as sv:
                 with patch("harperbot.harperbot.Github") as gh:
                     repo = gh.return_value.get_repo.return_value
@@ -888,16 +960,20 @@ class TestReviewPostingFlag(unittest.TestCase):
                     pr.get_issue_comments.return_value = []
                     repo.get_commit.return_value.get_check_runs.return_value = []
                     post_comment_webhook(
-                        "tok", "o/r",
-                        {"number": 1, "head_sha": "abc1234", "diff": "",
-                         "model_name": "m"},
-                        self._analysis_with_suggestion())
+                        "tok",
+                        "o/r",
+                        {"number": 1, "head_sha": "abc1234", "diff": "", "model_name": "m"},
+                        self._analysis_with_suggestion(),
+                    )
                     self.assertTrue(sv.called)
+
+
 class TestCheckRunActions(unittest.TestCase):
     """Re-run action present on create and edit, with the right identifier."""
 
     def _repo(self):
         from unittest.mock import Mock
+
         repo = Mock()
         commit = repo.get_commit.return_value
         commit.get_check_runs.return_value = []
@@ -905,9 +981,9 @@ class TestCheckRunActions(unittest.TestCase):
 
     def test_create_carries_action(self):
         from harperbot.harperbot import upsert_check_run
+
         repo = self._repo()
-        upsert_check_run(repo, "abc1234", summary="s", conclusion="success",
-                         annotations=[], run_url=None)
+        upsert_check_run(repo, "abc1234", summary="s", conclusion="success", annotations=[], run_url=None)
         _, kwargs = repo.create_check_run.call_args
         actions = kwargs["actions"]
         self.assertEqual(len(actions), 1)
@@ -916,12 +992,13 @@ class TestCheckRunActions(unittest.TestCase):
 
     def test_edit_preserves_action(self):
         from unittest.mock import Mock
+
         from harperbot.harperbot import upsert_check_run
+
         repo = Mock()
         existing = Mock()
         repo.get_commit.return_value.get_check_runs.return_value = [existing]
-        upsert_check_run(repo, "abc1234", summary="s", conclusion="neutral",
-                         annotations=[], run_url=None)
+        upsert_check_run(repo, "abc1234", summary="s", conclusion="neutral", annotations=[], run_url=None)
         _, kwargs = existing.edit.call_args
         self.assertEqual(kwargs["actions"][0]["identifier"], "rerun-analysis")
 
@@ -929,42 +1006,45 @@ class TestCheckRunActions(unittest.TestCase):
         # The check-runs API caps action descriptions at 40 chars;
         # exceeding it fails the whole create call with a 422.
         from harperbot.output import CHECK_RUN_ACTIONS
+
         for action in CHECK_RUN_ACTIONS:
             self.assertLessEqual(len(action["description"]), 40)
 
     def test_at_most_three_actions(self):
         from harperbot.output import CHECK_RUN_ACTIONS
+
         self.assertLessEqual(len(CHECK_RUN_ACTIONS), 3)
         for action in CHECK_RUN_ACTIONS:
             self.assertIn("identifier", action)
+
 
 class TestProviders(unittest.TestCase):
     """Auto-resolution, listing, validation, plugins. No network."""
 
     def _cfg(self, **over):
-        cfg = {"provider": "auto",
-               "provider_order": ["gemini", "openrouter", "cerebras"]}
+        cfg = {"provider": "auto", "provider_order": ["gemini", "openrouter", "cerebras"]}
         cfg.update(over)
         return cfg
 
     def test_auto_picks_first_keyed_provider(self):
         from harperbot import providers
+
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}, clear=False):
             for v in ("GEMINI_API_KEY", "CEREBRAS_API_KEY"):
                 os.environ.pop(v, None)
             name, key, err = providers.resolve_provider(self._cfg())
-            self.assertEqual((name, key, err),
-                             ("openrouter", "OPENROUTER_API_KEY", None))
+            self.assertEqual((name, key, err), ("openrouter", "OPENROUTER_API_KEY", None))
 
     def test_auto_prefers_order(self):
         from harperbot import providers
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "g",
-                                     "OPENROUTER_API_KEY": "o"}):
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g", "OPENROUTER_API_KEY": "o"}):
             name, _, _ = providers.resolve_provider(self._cfg())
             self.assertEqual(name, "gemini")
 
     def test_auto_no_keys_specific_error(self):
         from harperbot import providers
+
         with patch.dict(os.environ, {}, clear=False):
             for v in ("GEMINI_API_KEY", "OPENROUTER_API_KEY", "CEREBRAS_API_KEY"):
                 os.environ.pop(v, None)
@@ -974,22 +1054,24 @@ class TestProviders(unittest.TestCase):
 
     def test_unknown_provider_errors(self):
         from harperbot import providers
+
         name, _, err = providers.resolve_provider({"provider": "wat"})
         self.assertIsNone(name)
         self.assertIn("Unknown provider", err)
 
     def test_fixture_parses_and_filters_tools(self):
         import json
+
         fixture = json.load(open("tests/fixtures/openrouter_models.json"))
         ids = [m["id"] for m in fixture["data"]]
         self.assertIn("openrouter/auto", ids)
-        tools_ok = [m["id"] for m in fixture["data"]
-                    if "tools" in (m.get("supported_parameters") or [])]
+        tools_ok = [m["id"] for m in fixture["data"] if "tools" in (m.get("supported_parameters") or [])]
         self.assertTrue(tools_ok)
         self.assertEqual(len(tools_ok), len(ids) - 1)
 
     def test_plugins_only_for_auto(self):
         from harperbot import providers
+
         cfg = {"openrouter": {"allowed_models": ["a/*"], "cost_tier": "high"}}
         plugins = providers.openrouter_plugins(cfg, "openrouter/auto")
         self.assertEqual(plugins[0]["id"], "auto-router")
@@ -999,18 +1081,19 @@ class TestProviders(unittest.TestCase):
 
     def test_model_validation_warns_not_fails(self):
         from harperbot import providers
-        with patch("harperbot.providers.list_models",
-                   side_effect=RuntimeError("down")):
+
+        with patch("harperbot.providers.list_models", side_effect=RuntimeError("down")):
             self.assertTrue(providers.validate_model("openrouter", "x", None))
 
     def test_models_command_lists_and_exits_zero(self):
         import io
         from contextlib import redirect_stdout
         from unittest.mock import Mock
+
         from harperbot.harperbot import cmd_models
+
         args = Mock(provider="openrouter", command="models")
-        with patch("harperbot.providers.list_models",
-                   return_value=["openrouter/auto", "x/y"]) as ml:
+        with patch("harperbot.providers.list_models", return_value=["openrouter/auto", "x/y"]) as ml:
             buf = io.StringIO()
             with redirect_stdout(buf):
                 code = cmd_models(args)
@@ -1020,145 +1103,172 @@ class TestProviders(unittest.TestCase):
 
     def test_auto_end_to_end_selects_gemini(self):
         from unittest.mock import Mock, patch
+
         with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=False):
             for v in ("OPENROUTER_API_KEY", "CEREBRAS_API_KEY"):
                 os.environ.pop(v, None)
-            with patch("harperbot.harperbot.load_config", return_value={
+            with patch(
+                "harperbot.harperbot.load_config",
+                return_value={
                     "provider": "auto",
                     "provider_order": ["gemini", "openrouter", "cerebras"],
-                    "focus": "all", "max_diff_length": 4000,
+                    "focus": "all",
+                    "max_diff_length": 4000,
                     "max_output_tokens": 100,
-                    "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}"}):
+                    "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+                },
+            ):
                 client = Mock()
                 resp = Mock()
                 resp.text = "fine"
                 resp.candidates = None
                 client.models.generate_content.return_value = resp
                 from harperbot.harperbot import analyze_with_gemini
-                out = analyze_with_gemini(
-                    client, {"diff": "d", "files_changed": ["f"], "title": "t"})
+
+                out = analyze_with_gemini(client, {"diff": "d", "files_changed": ["f"], "title": "t"})
                 self.assertEqual(out, "fine")
 
     def test_footer_shows_provider(self):
         from harperbot.harperbot import build_review_comment
+
         body, ok = build_review_comment(
-            "text", {"head_sha": "abc1234", "model_name": "m",
-                     "provider_name": "openrouter"},
-            "o/r", {"model": "m"})
+            "text", {"head_sha": "abc1234", "model_name": "m", "provider_name": "openrouter"}, "o/r", {"model": "m"}
+        )
         self.assertIn("m via openrouter", body)
+
 
 class TestDriftCheck(unittest.TestCase):
     """Drift detection: present, absent, unreachable, CLI codes."""
+
     def _cfg(self):
-        return {"provider": "gemini", "provider_order": ["gemini"],
-                "model": "gemini-3.8-flash"}
+        return {"provider": "gemini", "provider_order": ["gemini"], "model": "gemini-3.8-flash"}
+
     def test_present_model_ok(self):
         from harperbot import providers
-        with patch("harperbot.providers.list_models",
-                   return_value=["gemini-3.8-flash", "other"]):
-            [r] = providers.check_model_drift(
-                self._cfg(), ["gemini"], environ={})
+
+        with patch("harperbot.providers.list_models", return_value=["gemini-3.8-flash", "other"]):
+            [r] = providers.check_model_drift(self._cfg(), ["gemini"], environ={})
             self.assertTrue(r["ok"])
             self.assertEqual(r["model"], "gemini-3.8-flash")
+
     def test_absent_model_drift(self):
         from harperbot import providers
-        with patch("harperbot.providers.list_models",
-                   return_value=["other"]):
-            [r] = providers.check_model_drift(
-                self._cfg(), ["gemini"], environ={})
+
+        with patch("harperbot.providers.list_models", return_value=["other"]):
+            [r] = providers.check_model_drift(self._cfg(), ["gemini"], environ={})
             self.assertFalse(r["ok"])
             self.assertIn("absent", r["detail"])
+
     def test_unreachable_listing_retries_then_reports(self):
         from harperbot import providers
+
         calls = []
+
         def flaky(*a, **k):
             calls.append(1)
             if len(calls) < 3:
                 raise RuntimeError("boom")
             return ["gemini-3.8-flash"]
+
         with patch("harperbot.providers.list_models", side_effect=flaky):
             with patch("harperbot.providers.time.sleep") as sl:
-                [r] = providers.check_model_drift(
-                    self._cfg(), ["gemini"], environ={})
+                [r] = providers.check_model_drift(self._cfg(), ["gemini"], environ={})
                 self.assertTrue(r["ok"])
                 self.assertEqual(len(calls), 3)
                 self.assertEqual(sl.call_count, 2)
+
     def test_persistent_failure_reports_unreachable(self):
         from harperbot import providers
-        with patch("harperbot.providers.list_models",
-                   side_effect=RuntimeError("down")):
+
+        with patch("harperbot.providers.list_models", side_effect=RuntimeError("down")):
             with patch("harperbot.providers.time.sleep"):
-                [r] = providers.check_model_drift(
-                    self._cfg(), ["gemini"], environ={})
+                [r] = providers.check_model_drift(self._cfg(), ["gemini"], environ={})
                 self.assertFalse(r["ok"])
                 self.assertIn("unreachable", r["detail"])
+
     def test_cli_exit_codes(self):
         import io
         from contextlib import redirect_stdout
         from unittest.mock import Mock
+
         from harperbot.harperbot import cmd_drift_check
-        with patch("harperbot.providers.check_model_drift",
-                   return_value=[{"provider": "g", "model": "m", "ok": True,
-                                  "detail": "present"}]):
+
+        with patch(
+            "harperbot.providers.check_model_drift",
+            return_value=[{"provider": "g", "model": "m", "ok": True, "detail": "present"}],
+        ):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 self.assertEqual(cmd_drift_check(Mock()), 0)
             self.assertIn("OK g m", buf.getvalue())
-        with patch("harperbot.providers.check_model_drift",
-                   return_value=[{"provider": "g", "model": "m", "ok": False,
-                                  "detail": "absent"}]):
+        with patch(
+            "harperbot.providers.check_model_drift",
+            return_value=[{"provider": "g", "model": "m", "ok": False, "detail": "absent"}],
+        ):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 self.assertEqual(cmd_drift_check(Mock()), 1)
             self.assertIn("DRIFT g m", buf.getvalue())
 
+
 class TestStickyProtocol(unittest.TestCase):
     """Author check plus skip/retry/force matrix."""
+
     def _comment(self, body, login="harperbot-knows[bot]"):
         from unittest.mock import Mock
+
         c = Mock()
         c.body = body
         c.user.login = login
         return c
+
     def _marker(self, shown, attempted="abc1234", status="ok"):
-        return (f"<!-- harperbot:summary shown:{shown} "
-                f"attempted:{attempted} status:{status} -->")
+        return f"<!-- harperbot:summary shown:{shown} " f"attempted:{attempted} status:{status} -->"
+
     def test_author_mismatch_ignored(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
+
         pr = Mock()
-        pr.get_issue_comments.return_value = [
-            self._comment("x " + self._marker("abc1234"), login="mallory")]
-        self.assertEqual(
-            find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"),
-            [])
+        pr.get_issue_comments.return_value = [self._comment("x " + self._marker("abc1234"), login="mallory")]
+        self.assertEqual(find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"), [])
+
     def test_author_match_kept(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
+
         pr = Mock()
         mine = self._comment("x " + self._marker("abc1234"))
         pr.get_issue_comments.return_value = [mine]
-        self.assertEqual(
-            find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"),
-            [mine])
+        self.assertEqual(find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"), [mine])
+
     def test_no_login_legacy_match(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
+
         pr = Mock()
         mine = self._comment("x " + self._marker("abc1234"))
         pr.get_issue_comments.return_value = [mine]
         self.assertEqual(find_existing_analysis_comments(pr), [mine])
+
     def test_skip_matrix(self):
-        from harperbot.harperbot import should_skip_review
         from unittest.mock import Mock
+
+        from harperbot.harperbot import should_skip_review
+
         sha = "abc1234def5678"
         ok = self._comment("x " + self._marker(sha, sha, "ok"))
         failed = self._comment("x " + self._marker("oldsha1", sha, "failed"))
         stale = self._comment("x " + self._marker("oldsha1", "oldsha1", "ok"))
+
         def pr_with(*comments):
             pr = Mock()
             pr.get_issue_comments.return_value = list(comments)
             return pr
+
         skip, _ = should_skip_review(pr_with(ok), sha, bot_login="harperbot-knows[bot]")
         self.assertTrue(skip)
         skip, _ = should_skip_review(pr_with(failed), sha, bot_login="harperbot-knows[bot]")
@@ -1167,15 +1277,16 @@ class TestStickyProtocol(unittest.TestCase):
         self.assertFalse(skip)
         skip, _ = should_skip_review(pr_with(), sha, bot_login="harperbot-knows[bot]")
         self.assertFalse(skip)
-        skip, _ = should_skip_review(pr_with(ok), sha, bot_login="harperbot-knows[bot]",
-                                      force=True)
+        skip, _ = should_skip_review(pr_with(ok), sha, bot_login="harperbot-knows[bot]", force=True)
         self.assertFalse(skip)
 
     def test_login_from_env_uses_no_api_call(self):
         """Installation tokens cannot read GET /user, so env wins."""
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
+
         g = Mock()
         env = {"HARPERBOT_LOGIN": "harperbot-knows[bot]"}
         with patch.dict(os.environ, env):
@@ -1185,7 +1296,9 @@ class TestStickyProtocol(unittest.TestCase):
     def test_login_falls_back_to_get_user(self):
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
+
         g = Mock()
         g.get_user.return_value.login = "someone-else"
         with patch.dict(os.environ, {"HARPERBOT_LOGIN": "  "}):
@@ -1195,11 +1308,14 @@ class TestStickyProtocol(unittest.TestCase):
         """Unknown identity must not filter, never filter wrongly."""
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
+
         g = Mock()
         g.get_user.side_effect = Exception("Resource not accessible")
         with patch.dict(os.environ, {"HARPERBOT_LOGIN": ""}):
             self.assertIsNone(resolve_bot_login(g))
+
 
 if __name__ == "__main__":
     unittest.main()
