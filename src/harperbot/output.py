@@ -141,6 +141,103 @@ def sanitize_model_text(text, prose=True):
     return text
 
 
+CHECK_RUN_NAME = "HarperBot review"
+
+# Annotation levels: notice and warning only. Never error/failure: the
+# Files-changed tab must not show red marks the conclusion won't back up.
+def _annotation_level(severity):
+    return "warning" if severity in ("critical", "high") else "notice"
+
+
+def parse_diff_added_lines(diff):
+    """Map each file to its added-line ranges: {path: [(start, end)]}.
+
+    Only added lines can carry inline findings; everything else belongs
+    in annotations or the summary.
+    """
+    added = {}
+    path = None
+    new_line = 0
+    for line in (diff or "").split("\n"):
+        if line.startswith("+++ b/"):
+            path = line[6:]
+            added.setdefault(path, [])
+        elif line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+            if m and path is not None:
+                new_line = int(m.group(1))
+        elif path is not None and new_line:
+            if line.startswith("+") and not line.startswith("+++"):
+                added[path].append((new_line, new_line))
+                new_line += 1
+            elif line.startswith("-"):
+                pass
+            else:
+                new_line += 1
+    # Coalesce adjacent single lines into ranges.
+    for path, spans in added.items():
+        merged = []
+        for start, end in sorted(spans):
+            if merged and start <= merged[-1][1] + 1:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        added[path] = [tuple(x) for x in merged]
+    return added
+
+
+def split_findings_by_diff(findings, added):
+    """Partition into (in_diff, out_of_diff).
+
+    In-diff findings are covered by the review path; only out-of-diff
+    findings become check annotations, so no finding is posted twice.
+    """
+    in_diff, out = [], []
+    for f in findings:
+        ranges = added.get(f.path, [])
+        line = f.line or 1
+        if any(s <= line <= e for s, e in ranges):
+            in_diff.append(f)
+        else:
+            out.append(f)
+    return in_diff, out
+
+
+def finding_to_annotation(finding):
+    """One check-annotation dict. File-level findings anchor at line 1."""
+    line = finding.line or 1
+    return {
+        "path": finding.path,
+        "start_line": line,
+        "end_line": line,
+        "annotation_level": _annotation_level(finding.severity),
+        "message": f"[{finding.severity}/{finding.category}] {finding.message}",
+    }
+
+
+def chunk_annotations(annotations, size=50):
+    """Split into API-sized batches (50 per request)."""
+    return [annotations[i:i + size] for i in range(0, len(annotations), size)]
+
+
+def check_conclusion(findings, failed):
+    """success with nothing to say, neutral otherwise. Never failure."""
+    if failed or findings:
+        return "neutral"
+    return "success"
+
+
+def build_check_summary(*, commit_sha, model, findings, analysis,
+                        failed=False, run_url=None):
+    """Check-run summary markdown. Long tail in <details>."""
+    head = [f"Reviewed `{commit_sha[:7]}` · {model or 'unknown model'} · "
+            f"{counts_line(findings)}"]
+    if failed:
+        head.append("This run did not complete; results below are partial.")
+    return ("\n".join(head) + "\n\n<details>\n<summary>Full analysis</summary>\n\n"
+            + sanitize_model_text(analysis) + "\n\n</details>")
+
+
 def counts_line(findings):
     """Counts by severity, e.g. '1 high · 2 medium', or 'no findings'."""
     if not findings:
@@ -192,6 +289,7 @@ def format_review_comment(
     model,
     run_url=None,
     focus="all",
+    check_url=None,
 ):
     """Full review comment. Analysis stays open: no <details> wrapper until
     a summary exists above it (structured summary is a later phase)."""
@@ -204,8 +302,12 @@ def format_review_comment(
         safe_analysis,
         "",
     ]
-    if run_url:
-        lines.append(f"<sub>[workflow run]({run_url})</sub>")
+    footer = "".join(
+        f"[{label}]({url})"
+        for label, url in (("workflow run", run_url), ("check run", check_url))
+        if url)
+    if footer:
+        lines.append(f"<sub>{footer}</sub>")
         lines.append("")
     lines.append(
         render_marker(commit_sha, commit_sha, "ok")
@@ -214,7 +316,7 @@ def format_review_comment(
 
 
 def format_fallback_comment(*, analysis, commit_sha, commit_url, model,
-                            run_url=None, focus="all"):
+                            run_url=None, focus="all", check_url=None):
     """Parse failure: raw analysis inside <details> with an explicit note."""
     safe_analysis = sanitize_model_text(analysis)
     lines = [
@@ -233,8 +335,12 @@ def format_fallback_comment(*, analysis, commit_sha, commit_url, model,
         "</details>",
         "",
     ]
-    if run_url:
-        lines.append(f"<sub>[workflow run]({run_url})</sub>")
+    footer = "".join(
+        f"[{label}]({url})"
+        for label, url in (("workflow run", run_url), ("check run", check_url))
+        if url)
+    if footer:
+        lines.append(f"<sub>{footer}</sub>")
         lines.append("")
     lines.append(
         render_marker(commit_sha, commit_sha, "ok")
