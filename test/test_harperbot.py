@@ -326,5 +326,85 @@ class TestErrorHandling(unittest.TestCase):
                 os.environ.pop(k, None)
             self.assertIsNone(workflow_run_url())
 
+    def test_tools_absent_when_flag_off(self):
+        """With custom_functions off, the request carries no tools."""
+        from unittest.mock import Mock
+        from unittest.mock import patch as _patch
+        with _patch("harperbot.load_config", return_value={
+                "provider": "gemini", "model": "m", "focus": "all",
+                "max_diff_length": 4000, "max_output_tokens": 100,
+                "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+                "custom_functions": False}):
+            with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
+                client = Mock()
+                resp = Mock()
+                resp.text = "done"
+                resp.candidates = None
+                client.models.generate_content.return_value = resp
+                from harperbot import analyze_with_gemini
+                out = analyze_with_gemini(
+                    client, {"diff": "d", "files_changed": ["f"], "title": "t"})
+                self.assertEqual(out, "done")
+                cfg = client.models.generate_content.call_args[1]["config"]
+                self.assertIsNone(cfg.tools)
+
+    def test_function_call_only_response_reports_parts(self):
+        """A textless reply names its finish reason and part kinds."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from unittest.mock import patch as _patch
+        part = SimpleNamespace(text=None,
+                               function_call=SimpleNamespace(name="check_python_syntax"))
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]),
+                               finish_reason="STOP")
+        mock_client = Mock()
+        mock_resp = Mock()
+        mock_resp.text = None
+        mock_resp.candidates = [cand]
+        mock_client.models.generate_content.return_value = mock_resp
+        with _patch("harperbot.load_config", return_value={
+                "provider": "gemini", "model": "m", "focus": "all",
+                "max_diff_length": 4000, "max_output_tokens": 100,
+                "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+                "custom_functions": False}):
+            with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
+                from harperbot import analyze_with_gemini, BotInternalError
+                try:
+                    analyze_with_gemini(
+                        mock_client, {"diff": "d", "files_changed": ["f"],
+                                      "title": "t"})
+                    self.fail("expected BotInternalError")
+                except BotInternalError as e:
+                    self.assertIn("function_call", e.public_message)
+                    self.assertIn("STOP", e.public_message)
+
+    def test_blocked_response_names_block_reason(self):
+        """A blocked reply names the block reason, not a generic message."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from unittest.mock import patch as _patch
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[]),
+                               finish_reason="OTHER")
+        mock_client = Mock()
+        mock_resp = Mock()
+        mock_resp.text = None
+        mock_resp.candidates = [cand]
+        mock_resp.prompt_feedback = SimpleNamespace(block_reason="SAFETY")
+        mock_client.models.generate_content.return_value = mock_resp
+        with _patch("harperbot.load_config", return_value={
+                "provider": "gemini", "model": "m", "focus": "all",
+                "max_diff_length": 4000, "max_output_tokens": 100,
+                "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+                "custom_functions": False}):
+            with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
+                from harperbot import analyze_with_gemini, BotInternalError
+                try:
+                    analyze_with_gemini(
+                        mock_client, {"diff": "d", "files_changed": ["f"],
+                                      "title": "t"})
+                    self.fail("expected BotInternalError")
+                except BotInternalError as e:
+                    self.assertIn("SAFETY", e.public_message)
+
 if __name__ == "__main__":
     unittest.main()

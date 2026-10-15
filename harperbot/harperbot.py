@@ -185,6 +185,10 @@ Provide a concise code review analysis in this format:
 
     default_config = {
         "focus": "all",
+        # Request custom function tools from the model. Off by default:
+        # function calls are never answered yet, and requesting tools
+        # diverts responses into function calls the bot drops.
+        "custom_functions": False,
         "model": "gemini-2.0-flash",
         "max_diff_length": 4000,
         "temperature": 0.2,
@@ -220,9 +224,10 @@ class BotInternalError(Exception):
     non-zero; raw detail stays in the run log only.
     """
 
-    def __init__(self, step):
+    def __init__(self, step, public_message=None):
         self.step = step
-        super().__init__(f"Bot error during {step}")
+        self.public_message = public_message
+        super().__init__(public_message or f"Bot error during {step}")
 
 
 def workflow_run_url():
@@ -253,6 +258,43 @@ def _is_transient_transport(error, code):
     return "timeout" in typename or "connect" in typename
 
 
+def _empty_response_notice(response):
+    msg = f"Model returned no text ({describe_empty_response(response)})."
+    link = workflow_run_url()
+    if link:
+        msg += f" See the workflow run: {link}."
+    return msg
+
+
+def describe_empty_response(response):
+    """Known facts about a textless response: finish reasons, block reason,
+    part kinds. States what is in the response without asserting a cause."""
+    reasons = []
+    kinds = []
+    for cand in getattr(response, "candidates", None) or []:
+        fr = getattr(cand, "finish_reason", None)
+        if fr is not None and str(fr) not in reasons:
+            reasons.append(str(fr))
+        for part in getattr(getattr(cand, "content", None), "parts", None) or []:
+            if getattr(part, "text", None):
+                kind = "text"
+            elif hasattr(part, "function_call"):
+                kind = "function_call"
+            else:
+                kind = "other"
+            if kind not in kinds:
+                kinds.append(kind)
+    block = getattr(getattr(response, "prompt_feedback", None),
+                    "block_reason", None)
+    bits = []
+    if reasons:
+        bits.append("finish reason: " + ", ".join(reasons))
+    if block:
+        bits.append("block reason: " + str(block))
+    bits.append("parts: " + (", ".join(kinds) if kinds else "none"))
+    return "; ".join(bits)
+
+
 def classify_provider_error(error, context):
     """Map a provider SDK failure to a safe public message.
 
@@ -261,6 +303,8 @@ def classify_provider_error(error, context):
     BotInternalError, which callers report as a bot error and exit
     non-zero. Raw detail is logged here, in the run log only.
     """
+    if isinstance(error, BotInternalError):
+        raise error
     code = getattr(error, "code", getattr(error, "status_code", None))
     if _is_transient_transport(error, code):
         logging.warning(f"API transport error{context}: {error}")
@@ -336,35 +380,39 @@ def analyze_with_gemini(client, pr_details):
         )
 
         if provider == "gemini":
-            # Define custom tools
-            def check_python_syntax(code: str) -> str:
-                """Check Python code for syntax errors."""
-                try:
-                    ast.parse(code)
-                    return "No syntax errors found."
-                except SyntaxError as e:
-                    return f"Syntax error: {e}"
+            # Function calls are never answered (no execute-and-send-back
+            # loop yet), so tools stay off unless explicitly enabled.
+            tools = None
+            if config.get("custom_functions", False):
+                # Define custom tools
+                def check_python_syntax(code: str) -> str:
+                    """Check Python code for syntax errors."""
+                    try:
+                        ast.parse(code)
+                        return "No syntax errors found."
+                    except SyntaxError as e:
+                        return f"Syntax error: {e}"
 
-            tools = [
-                types.Tool(
-                    function_declarations=[
-                        types.FunctionDeclaration(
-                            name="check_python_syntax",
-                    description="Check Python code for syntax errors",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The Python code to check",
-                            }
+                tools = [
+                    types.Tool(
+                        function_declarations=[
+                            types.FunctionDeclaration(
+                                name="check_python_syntax",
+                        description="Check Python code for syntax errors",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "code": {
+                                    "type": "string",
+                                    "description": "The Python code to check",
+                                }
+                            },
+                            "required": ["code"],
                         },
-                        "required": ["code"],
-                    },
-                        )
-                    ],
-                )
-            ]
+                            )
+                        ],
+                    )
+                ]
 
             # Generate content with config
             response = client.models.generate_content(
@@ -479,12 +527,16 @@ def analyze_with_gemini(client, pr_details):
                         elif "SAFETY" in str(finish_reason):
                             return "Analysis blocked due to content safety filters. Please ensure the PR content complies with usage policies."
                         elif "STOP" in str(finish_reason):
-                            return "Analysis completed but no content was generated. This may indicate an issue with the prompt or model."
+                            raise BotInternalError(
+                                "analysis",
+                                public_message=_empty_response_notice(response))
 
-            # If we get here, no text found - log and return safe message
-            logging.warning(f"No text extracted from response. Response type: {type(response)}")
-            return "Unable to generate analysis due to an unexpected response format. Please try again or review the code manually."
+            # No text and no recognized finish reason: describe, don't diagnose.
+            raise BotInternalError(
+                "analysis", public_message=_empty_response_notice(response))
 
+        except BotInternalError:
+            raise
         except Exception as e:
             # Log the error and return safe info
             logging.error(f"Error processing Gemini response: {str(e)}")
@@ -1044,11 +1096,13 @@ def main():
     try:
         analysis = analyze_with_gemini(client, pr_details)
     except BotInternalError as e:
-        link = workflow_run_url()
-        notice = f"Bot error during {e.step}."
-        if link:
-            notice += f" See the workflow run: {link}."
-        notice += " No review was posted."
+        notice = e.public_message
+        if notice is None:
+            link = workflow_run_url()
+            notice = f"Bot error during {e.step}."
+            if link:
+                notice += f" See the workflow run: {link}."
+            notice += " No review was posted."
         try:
             post_comment_webhook(github_token, args.repo, pr_details, notice)
         except Exception as post_e:

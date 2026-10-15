@@ -37,6 +37,11 @@ max_diff_length: 4000
 # Lower values (0.0-0.3) for consistent, focused analysis; higher for more creative suggestions.
 temperature: 0.2
 
+# Request custom function tools from the model. Off by default: function
+# calls are never answered yet (no execute-and-send-back loop), and
+# requesting tools diverts responses into function calls the bot drops.
+custom_functions: false
+
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
 max_output_tokens: 4096
