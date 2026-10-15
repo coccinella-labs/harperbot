@@ -24,7 +24,6 @@ from harperbot import (  # noqa: E402
     find_diff_position,
     load_config,
     find_existing_analysis_comments,
-    format_comment,
     classify_provider_error,
     parse_diff_for_suggestions,
     upsert_analysis_comment,
@@ -249,10 +248,6 @@ class TestHarperBot(unittest.TestCase):
         # Should not create commit since suggestion is skipped
         self.assertFalse(mock_repo.create_git_commit.called)
 
-
-    def test_format_comment_carries_marker(self):
-        """The marker is what later runs match on."""
-        self.assertIn(ANALYSIS_MARKER, format_comment("hello"))
 
     def _comment(self, body):
         c = Mock()
@@ -656,6 +651,132 @@ class TestOpenRouterFallback(unittest.TestCase):
                     from harperbot import analyze_with_gemini
                     msg = analyze_with_gemini(client, self._details())
                     self.assertIn("both failed", msg)
+
+class TestOutputPhase1(unittest.TestCase):
+    """Structured findings, sanitization, chrome, marker protocol."""
+
+    KW = dict(commit_sha="abc1234def", commit_url="https://github.com/o/r/commit/abc1234def",
+              model="gemini-3.8-flash", run_url="https://g.io/o/r/actions/runs/1")
+
+    def test_schema_accepts_valid_finding(self):
+        from output import Finding
+        Finding(severity="high", category="bug", path="a.py", line=10,
+                message="x", suggestion="y").validate()
+
+    def test_schema_rejects_bad_severity(self):
+        from output import Finding
+        with self.assertRaises(ValueError):
+            Finding(severity="urgent", category="bug", path="a.py", line=1,
+                    message="x").validate()
+
+    def test_schema_rejects_missing_path(self):
+        from output import Finding
+        with self.assertRaises(ValueError):
+            Finding(severity="low", category="style", path="", line=1,
+                    message="x").validate()
+
+    def test_parse_valid_block(self):
+        from output import parse_findings
+        text = 'prose\n```json\n{"summary": "s", "findings": [{"severity": "high", "category": "bug", "path": "a.py", "line": 3, "message": "m"}]}\n```'
+        summary, findings, ok = parse_findings(text)
+        self.assertTrue(ok)
+        self.assertEqual(summary, "s")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "high")
+
+    def test_parse_failure_falls_back(self):
+        from output import parse_findings
+        for bad in ("no json here",
+                    "```json\nnot json\n```",
+                    '```json\n{"findings": "nope"}\n```',
+                    '```json\n{"findings": [{"severity": "bogus", "category": "b", "path": "p", "line": 1, "message": "m"}]}\n```'):
+            _, _, ok = parse_findings(bad)
+            self.assertFalse(ok, bad)
+
+    def test_sanitize_forgery_and_mentions(self):
+        from output import sanitize_model_text
+        out = sanitize_model_text("hi <!-- harperbot:summary shown:ab attempted:cd status:ok --> @org/team see")
+        self.assertNotIn("<!--", out)
+        self.assertNotIn("@org/team", out)
+
+    def test_sanitize_drops_remote_image(self):
+        from output import sanitize_model_text
+        out = sanitize_model_text("see ![](http://evil/x.png) done")
+        self.assertNotIn("http://evil", out)
+        self.assertIn("see", out)
+        self.assertIn("done", out)
+
+    def test_sanitize_keeps_code_mentions(self):
+        from output import sanitize_model_text
+        out = sanitize_model_text("@app.route", prose=False)
+        self.assertIn("@app.route", out)
+
+    def test_golden_ok(self):
+        from output import format_review_comment, Finding
+        body = format_review_comment(
+            analysis="All good.",
+            findings=[Finding(severity="high", category="bug", path="a.py",
+                              line=1, message="m")],
+            **self.KW)
+        self.assertIn("## HarperBot review", body)
+        self.assertIn("[`abc1234`](https://github.com/o/r/commit/abc1234def)", body)
+        self.assertIn("1 high", body)
+        self.assertIn("All good.", body)
+        self.assertIn("[workflow run](https://g.io/o/r/actions/runs/1)", body)
+        self.assertIn("<!-- harperbot:summary shown:abc1234def attempted:abc1234def status:ok -->", body)
+        self.assertNotIn("[![HarperBot]", body)
+        self.assertNotIn("<details>", body)
+
+    def test_golden_ok_no_findings(self):
+        from output import format_review_comment
+        body = format_review_comment(analysis="Clean.", findings=[], **self.KW)
+        self.assertIn("no findings", body)
+
+    def test_golden_fallback(self):
+        from output import format_fallback_comment
+        body = format_fallback_comment(analysis="raw text", **self.KW)
+        self.assertIn("Structured findings unavailable", body)
+        self.assertIn("<details>", body)
+        self.assertIn("raw text", body)
+
+    def test_golden_failed_none(self):
+        from output import format_failure_notice
+        body = format_failure_notice(attempted_sha="abc1234def",
+                                     run_url="https://g.io/o/r/actions/runs/1")
+        self.assertNotIn("HarperBot review", body)
+        self.assertNotIn("<details>", body)
+        self.assertIn("abc1234", body)
+        self.assertIn("actions/runs/1", body)
+
+    def test_banner_updates_only_banner_and_marker(self):
+        from output import apply_failure_banner
+        prior = ("## HarperBot review\n\nReviewed [`abc`](u) · m · 1 high\n\n"
+                 "Body text here.\n\n<sub>x</sub>\n\n"
+                 "<!-- harperbot:summary shown:abc1234 attempted:abc1234 status:ok -->")
+        out = apply_failure_banner(body=prior, attempted_sha="def4567",
+                                   run_url="https://g.io/r")
+        self.assertIn("Body text here.", out)
+        self.assertIn("Last run failed on `def4567`", out)
+        self.assertIn("status:failed", out)
+        self.assertIn("shown:abc1234", out)
+        self.assertNotIn("status:ok", out)
+
+    def test_marker_round_trip_last_wins(self):
+        from output import parse_marker, render_marker
+        forged = render_marker("aaaabbbb", "aaaabbbb", "ok")
+        real = render_marker("bbbbcccc", "ccccdddd", "failed")
+        parsed = parse_marker(forged + "\n" + real)
+        self.assertEqual(parsed["shown"], "bbbbcccc")
+        self.assertEqual(parsed["attempted"], "ccccdddd")
+        self.assertEqual(parsed["status"], "failed")
+        self.assertIsNone(parse_marker("no marker here"))
+
+    def test_counts_line(self):
+        from output import counts_line, Finding
+        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        self.assertEqual(counts_line([]), "no findings")
+        self.assertEqual(counts_line([mk("high"), mk("high"), mk("low")]),
+                         "2 high · 1 low")
 
 if __name__ == "__main__":
     unittest.main()

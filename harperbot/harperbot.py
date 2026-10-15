@@ -30,6 +30,11 @@ try:
 except ImportError:  # executed directly as a script
     from harperbot_apply import handle_apply_comment
 
+try:
+    from . import output as _output
+except ImportError:  # executed directly as a script
+    import output as _output
+
 # Flask imported conditionally for webhook mode
 flask_available = False
 try:
@@ -159,6 +164,17 @@ def load_config():
 
 {focus_instruction}
 
+Review discipline (these override any conflicting habit):
+- Judge only what the diff shows. If context is missing for a judgment,
+  say so instead of guessing.
+- Report problems only: bugs, risks, missing tests, security issues.
+  An empty findings list is a valid answer. Do not pad with praise or
+  restate the change as an achievement.
+- Every finding needs severity, the exact conditions that trigger it,
+  and evidence (file, line, the code in question). Do not flag what the
+  diff cannot support.
+- Style nits only if they cause real harm.
+
 Provide a concise code review analysis in this format:
 
 ## Summary
@@ -185,7 +201,21 @@ Provide a concise code review analysis in this format:
 - [Use ```diff format for each suggestion]
 
 ### Next Steps
-- [Actionable items for the author]"""
+- [Actionable items for the author]
+
+### Structured findings (machine-readable, after the prose above)
+End your response with a fenced JSON block listing each concrete problem
+found, so counts and inline comments can be derived without parsing prose:
+```json
+{{"summary": "one-paragraph overall assessment",
+ "findings": [{{"severity": "critical|high|medium|low|info",
+   "category": "bug|security|performance|quality|style",
+   "path": "relative/file.py", "line": 42,
+   "message": "what is wrong, why, and the exact conditions that trigger it",
+   "suggestion": "optional concrete fix"}}]}}
+```
+An empty "findings" list is valid when nothing is wrong. Keep the
+human-readable review above; the JSON mirrors its actionable items."""
 
     default_config = {
         "focus": "all",
@@ -459,6 +489,7 @@ def analyze_with_gemini(client, pr_details):
             model_name = config.get("openrouter_model", "openrouter/auto")
         else:
             raise ValueError(f"Unsupported provider: {provider}")
+        pr_details["model_name"] = model_name
 
         # Use client for selected model
 
@@ -538,9 +569,10 @@ def analyze_with_gemini(client, pr_details):
                         f"Gemini failed ({type(gemini_error).__name__}), "
                         f"trying OpenRouter model {or_model}")
                     try:
-                        or_content, _ = generate_openrouter(
+                        or_content, or_resolved = generate_openrouter(
                             or_key, or_model, formatted_prompt,
                             max_output_tokens)
+                        pr_details["model_name"] = or_resolved
                     except Exception as or_error:
                         logging.error(f"OpenRouter fallback also failed: {or_error}")
                         return ("Error generating analysis: API unavailable "
@@ -568,8 +600,9 @@ def analyze_with_gemini(client, pr_details):
         elif provider == "openrouter":
             api_key = os.environ.get("OPENROUTER_API_KEY")
             try:
-                content, _ = generate_openrouter(
+                content, resolved = generate_openrouter(
                     api_key, model_name, formatted_prompt, max_output_tokens)
+                pr_details["model_name"] = resolved
             except requests.HTTPError as e:
                 code = (e.response.status_code
                         if e.response is not None else None)
@@ -725,21 +758,6 @@ def parse_diff_for_suggestions(diff_text):
     if suggestion_lines:
         return file_path, line_num, "\n".join(suggestion_lines)
     return None
-
-
-def format_comment(analysis):
-    """Format the analysis with proper markdown and emojis."""
-    return f"""[![HarperBot](https://github.com/coccinella-labs/harperbot/actions/workflows/harperbot.yml/badge.svg)](https://github.com/coccinella-labs/harperbot/actions/workflows/harperbot.yml)
-
-<details>
-<summary>HarperBot Analysis</summary>
-
-{analysis}
-
-</details>
-
----
-{ANALYSIS_MARKER}"""
 
 
 def parse_code_suggestions(analysis):
@@ -1135,9 +1153,12 @@ def find_existing_analysis_comments(pr):
     matches = []
     for comment in pr.get_issue_comments():
         body = comment.body or ""
-        if ANALYSIS_MARKER in body or (
-            LEGACY_ANALYSIS_SIGNATURE in body
-            and "harperbot/actions/workflows" in body
+        if _output.parse_marker(body) is not None or (
+            ANALYSIS_MARKER in body
+            or (
+                LEGACY_ANALYSIS_SIGNATURE in body
+                and "harperbot/actions/workflows" in body
+            )
         ):
             matches.append(comment)
     return matches
@@ -1164,6 +1185,42 @@ def upsert_analysis_comment(pr, formatted_comment):
             logging.warning(f"Could not delete stale analysis comment: {e}")
 
 
+def build_review_comment(analysis, pr_details, repo_name, config):
+    """Assemble the sticky review comment through one pipeline.
+
+    Returns (body, ok). ok=False means the findings block was missing
+    or invalid, and the body is the raw-analysis fallback.
+    """
+    commit_sha = pr_details.get("head_sha", "")
+    commit_url = f"https://github.com/{repo_name}/commit/{commit_sha}"
+    model = pr_details.get("model_name") or config.get("model", "?")
+    focus = config.get("focus", "all")
+    run_url = workflow_run_url()
+    summary, findings, ok = _output.parse_findings(analysis)
+    if ok:
+        return _output.format_review_comment(
+            analysis=analysis, findings=findings, commit_sha=commit_sha,
+            commit_url=commit_url, model=model, run_url=run_url,
+            focus=focus), True
+    return _output.format_fallback_comment(
+        analysis=analysis, commit_sha=commit_sha, commit_url=commit_url,
+        model=model, run_url=run_url, focus=focus), False
+
+
+def record_failure(pr, attempted_sha, run_url):
+    """Failed run: banner-update a prior review, or post a plain notice."""
+    for comment in pr.get_issue_comments():
+        body = comment.body or ""
+        if _output.parse_marker(body) is not None or _output.find_legacy(body):
+            comment.edit(_output.apply_failure_banner(
+                body=body, attempted_sha=attempted_sha, run_url=run_url))
+            logging.info("Updated sticky comment banner after failed run")
+            return
+    pr.create_issue_comment(_output.format_failure_notice(
+        attempted_sha=attempted_sha, run_url=run_url))
+    logging.info("Posted failure notice (no prior review)")
+
+
 def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, analysis: str):
     """
     Post analysis comment and inline suggestions using GitHub App auth.
@@ -1182,7 +1239,8 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
         main_comment = update_main_comment(analysis)
 
         # Upsert the main analysis comment: one comment per PR.
-        formatted_comment = format_comment(main_comment)
+        formatted_comment, _ = build_review_comment(
+            main_comment, pr_details, repo_name, config)
         upsert_analysis_comment(pr, formatted_comment)
 
         # Post or save inline suggestions based on config
@@ -1271,6 +1329,8 @@ def main():
     parser = argparse.ArgumentParser(description="GitHub PR Bot with Gemini AI")
     parser.add_argument("--repo", required=True, help="GitHub repository in format: owner/repo")
     parser.add_argument("--pr", type=int, required=True, help="Pull request number")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print the exact comment without posting")
     args = parser.parse_args()
 
     # Setup environment and get PR details
@@ -1289,8 +1349,15 @@ def main():
             if link:
                 notice += f" See the workflow run: {link}."
             notice += " No review was posted."
+        if args.dry_run:
+            print(notice)
+            sys.exit(1)
         try:
-            post_comment_webhook(github_token, args.repo, pr_details, notice)
+            g = Github(github_token)
+            repo = g.get_repo(args.repo)
+            pr = repo.get_pull(pr_details["number"])
+            record_failure(pr, pr_details.get("head_sha", ""),
+                           workflow_run_url())
         except Exception as post_e:
             logging.error(f"Failed to post error notice: {post_e}")
         sys.exit(1)
@@ -1299,6 +1366,12 @@ def main():
 
     # Post the comment with formatted analysis
     logging.info("Posting analysis to PR...")
+    if args.dry_run:
+        config = load_config()
+        body, _ = build_review_comment(
+            analysis, pr_details, args.repo, config)
+        print(body)
+        return
     try:
         post_comment_webhook(github_token, args.repo, pr_details, analysis)
         logging.info("Analysis complete!")
