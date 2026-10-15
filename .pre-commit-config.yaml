@@ -5,7 +5,7 @@
 repos:
   # Python Formatting
   - repo: https://github.com/psf/black
-    rev: 24.8.0
+    rev: 26.10.1
     hooks:
       - id: black
         name: black
@@ -18,7 +18,7 @@ repos:
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 9.0.2
     hooks:
       - id: isort
         name: isort (python)
@@ -30,16 +30,14 @@ repos:
 
   # Python Linting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.4
+    rev: v0.17.1
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
-      - id: ruff-format
-        args: [--line-length=127]
 
   # YAML Linting
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         name: yamllint
@@ -52,12 +50,15 @@ repos:
 
   # Spelling
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    rev: v2.4.3
     hooks:
       - id: codespell
         args:
           - --skip=*.pyc,*.pyo,__pycache__
-        exclude: \.py$
+        # .py files carry model-authored prompt text and API vocabulary
+        # that are not English prose. tests/fixtures holds recorded API
+        # responses: editing a typo there would falsify the recording.
+        exclude: ^(.*\.py|tests/fixtures/.*)$
 
   # JSON
   - repo: https://github.com/pre-commit/pre-commit-hooks
