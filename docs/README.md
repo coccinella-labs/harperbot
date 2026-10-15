@@ -9,6 +9,7 @@ This bot automatically analyzes pull requests using Google's Gemini AI and posts
 - Identifies potential issues and bugs
 - Suggests improvements
 - Posts detailed analysis as PR comments
+- Model function-calling tools are disabled by default (`custom_functions: false`), because answered calls are not implemented yet
 - **NEW**: Can author code changes directly (auto-commit suggestions, create improvement PRs)
 
 ## Setup

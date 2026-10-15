@@ -188,6 +188,10 @@ Provide a concise code review analysis in this format:
 
     default_config = {
         "focus": "all",
+        # Request custom function tools from the model. Off by default:
+        # function calls are never answered yet, and requesting tools
+        # diverts responses into function calls the bot drops.
+        "custom_functions": False,
         "model": "gemini-3.8-flash",
         "max_diff_length": 4000,
         "temperature": 0.2,
@@ -216,6 +220,159 @@ Provide a concise code review analysis in this format:
     return default_config
 
 
+class BotInternalError(Exception):
+    """Unexpected bot failure, as opposed to a provider error.
+
+    Carries the failing step. Callers post a short notice and exit
+    non-zero; raw detail stays in the run log only.
+    """
+
+    def __init__(self, step, public_message=None):
+        self.step = step
+        self.public_message = public_message
+        super().__init__(public_message or f"Bot error during {step}")
+
+
+def workflow_run_url():
+    """Actions run URL, or None outside Actions (e.g. webhook mode)."""
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if server and repo and run_id:
+        return f"{server}/{repo}/actions/runs/{run_id}"
+    return None
+
+
+def _is_transient_transport(error, code):
+    """True for timeouts and connection failures, which carry no status.
+
+    Builtin TimeoutError/ConnectionError cover sockets and most HTTP
+    stacks. The type-name fallback covers SDK transport errors such as
+    httpx.TimeoutException or Cerebras APITimeoutError/APIConnectionError,
+    which are not builtin subclasses. Matching is on the exception type,
+    never on message text. A network blip must read as transient, not as
+    a bot bug.
+    """
+    if code is not None:
+        return False
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return True
+    typename = type(error).__name__.lower()
+    return "timeout" in typename or "connect" in typename
+
+
+def _empty_response_notice(response):
+    msg = f"Model returned no text ({describe_empty_response(response)})."
+    link = workflow_run_url()
+    if link:
+        msg += f" See the workflow run: {link}."
+    return msg
+
+
+def describe_empty_response(response):
+    """Known facts about a textless response: finish reasons, block reason,
+    part kinds. States what is in the response without asserting a cause."""
+    reasons = []
+    kinds = []
+    for cand in getattr(response, "candidates", None) or []:
+        fr = getattr(cand, "finish_reason", None)
+        if fr is not None and str(fr) not in reasons:
+            reasons.append(str(fr))
+        for part in getattr(getattr(cand, "content", None), "parts", None) or []:
+            if getattr(part, "text", None):
+                kind = "text"
+            elif getattr(part, "function_call", None) is not None:
+                kind = "function_call"
+            else:
+                kind = "other"
+            if kind not in kinds:
+                kinds.append(kind)
+    block = getattr(getattr(response, "prompt_feedback", None),
+                    "block_reason", None)
+    bits = []
+    if reasons:
+        bits.append("finish reason: " + ", ".join(reasons))
+    if block:
+        bits.append("block reason: " + str(block))
+    bits.append("parts: " + (", ".join(kinds) if kinds else "none"))
+    return "; ".join(bits)
+
+
+def log_api_usage(response, model_name, provider):
+    """Log token counts and finish reason. Counts only, never content.
+
+    Fully defensive: usage shapes differ per provider and can be absent
+    on errors or blocked responses. A logging failure must never fail
+    a review, so the whole body is guarded.
+    """
+    try:
+        usage = getattr(response, "usage_metadata", None) or getattr(
+            response, "usage", None)
+
+        def _count(*names):
+            for name in names:
+                value = getattr(usage, name, None) if usage is not None else None
+                if isinstance(value, int):
+                    return value
+            return None
+
+        prompt = _count("prompt_token_count", "prompt_tokens")
+        candidates = _count("candidates_token_count", "completion_tokens")
+        thinking = _count("thoughts_token_count", "thinking_tokens")
+        total = _count("total_token_count", "total_tokens")
+        finish = None
+        for cand in getattr(response, "candidates", None) or []:
+            finish = getattr(cand, "finish_reason", None)
+            if finish is not None:
+                break
+        if finish is None:
+            for choice in getattr(response, "choices", None) or []:
+                finish = getattr(choice, "finish_reason", None)
+                if finish is not None:
+                    break
+        logging.info(
+            f"API usage model={model_name} provider={provider} "
+            f"prompt={prompt} candidates={candidates} thinking={thinking} "
+            f"total={total} finish={finish}")
+    except Exception as e:
+        logging.debug(f"Usage logging failed (non-fatal): {e}")
+
+
+def classify_provider_error(error, context):
+    """Map a provider SDK failure to a safe public message.
+
+    Classification is structural: HTTP status read from the exception
+    object, never message-text matching. Anything unrecognized raises
+    BotInternalError, which callers report as a bot error and exit
+    non-zero. Raw detail is logged here, in the run log only.
+    """
+    if isinstance(error, BotInternalError):
+        raise error
+    code = getattr(error, "code", getattr(error, "status_code", None))
+    if _is_transient_transport(error, code):
+        logging.warning(f"API transport error{context}: {error}")
+        return (f"Error generating analysis: API temporarily unreachable{context}. "
+                f"Please try again later.")
+    if code in (400, 404):
+        logging.error(f"API model error{context}: {error}")
+        return (f"Error generating analysis: Requested model not available{context}. "
+                f"Please check the configured model.")
+    if code in (401, 403):
+        logging.error(f"API authentication error{context}: {error}")
+        return ("Error generating analysis: Invalid API key or authentication"
+                f" failed{context}. Please check the provider API key.")
+    if code == 429:
+        logging.error(f"API quota/rate limit error{context}: {error}")
+        return (f"Error generating analysis: API quota exceeded{context}. "
+                f"Please check billing or try again later.")
+    if isinstance(code, int) and 500 <= code < 600:
+        logging.error(f"API server error{context}: {error}")
+        return (f"Error generating analysis: API unavailable{context}. "
+                f"Please try again later.")
+    logging.exception(f"Unexpected bot error during analysis{context}")
+    raise BotInternalError("analysis") from error
+
+
 def analyze_with_gemini(client, pr_details):
     """Analyze the PR using Gemini API."""
     try:
@@ -227,6 +384,11 @@ def analyze_with_gemini(client, pr_details):
         max_output_tokens = config.get("max_output_tokens", 4096)
         safety_settings = config.get("safety_settings", [])
         provider = config.get("provider", "gemini")
+        required_key = {"gemini": "GEMINI_API_KEY",
+                        "cerebras": "CEREBRAS_API_KEY"}[provider]
+        if not os.environ.get(required_key):
+            return (f"{required_key} is not set for provider {provider}. "
+                    f"Add it as a repository secret; no review was performed.")
 
         # Auto-select model based on PR complexity
         diff_length = len(pr_details["diff"])
@@ -261,31 +423,39 @@ def analyze_with_gemini(client, pr_details):
         )
 
         if provider == "gemini":
-            # Define custom tools
-            def check_python_syntax(code: str) -> str:
-                """Check Python code for syntax errors."""
-                try:
-                    ast.parse(code)
-                    return "No syntax errors found."
-                except SyntaxError as e:
-                    return f"Syntax error: {e}"
+            # Function calls are never answered (no execute-and-send-back
+            # loop yet), so tools stay off unless explicitly enabled.
+            tools = None
+            if config.get("custom_functions", False):
+                # Define custom tools
+                def check_python_syntax(code: str) -> str:
+                    """Check Python code for syntax errors."""
+                    try:
+                        ast.parse(code)
+                        return "No syntax errors found."
+                    except SyntaxError as e:
+                        return f"Syntax error: {e}"
 
-            tools = [
-                types.FunctionDeclaration(
-                    name="check_python_syntax",
-                    description="Check Python code for syntax errors",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The Python code to check",
-                            }
+                tools = [
+                    types.Tool(
+                        function_declarations=[
+                            types.FunctionDeclaration(
+                                name="check_python_syntax",
+                        description="Check Python code for syntax errors",
+                        parameters={
+                            "type": "object",
+                            "properties": {
+                                "code": {
+                                    "type": "string",
+                                    "description": "The Python code to check",
+                                }
+                            },
+                            "required": ["code"],
                         },
-                        "required": ["code"],
-                    },
-                )
-            ]
+                            )
+                        ],
+                    )
+                ]
 
             # Generate content with config
             response = client.models.generate_content(
@@ -300,6 +470,7 @@ def analyze_with_gemini(client, pr_details):
                     tools=tools,
                 ),
             )
+            log_api_usage(response, model_name, provider)
         elif provider == "cerebras":
             # Use Cerebras client
             cerebras_client = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
@@ -310,6 +481,7 @@ def analyze_with_gemini(client, pr_details):
                 temperature=temperature,
                 top_p=0.95,
             )
+            log_api_usage(response, model_name, provider)
             # Wrap response to mimic Gemini structure
             response.text = response.choices[0].message.content
             response.candidates = None  # No function calls for now
@@ -317,8 +489,10 @@ def analyze_with_gemini(client, pr_details):
         # Check for function calls
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
-                if hasattr(part, "function_call"):
-                    logging.info(f"Function call detected: {part.function_call.name}")
+                call = getattr(part, "function_call", None)
+                if call is not None:
+                    logging.info(
+                        f"Function call detected: {getattr(call, 'name', '?')}")
                     # For now, just log; full handling would execute and send back
 
         # Handle different response formats
@@ -400,34 +574,26 @@ def analyze_with_gemini(client, pr_details):
                         elif "SAFETY" in str(finish_reason):
                             return "Analysis blocked due to content safety filters. Please ensure the PR content complies with usage policies."
                         elif "STOP" in str(finish_reason):
-                            return "Analysis completed but no content was generated. This may indicate an issue with the prompt or model."
+                            raise BotInternalError(
+                                "analysis",
+                                public_message=_empty_response_notice(response))
 
-            # If we get here, no text found - log and return safe message
-            logging.warning(f"No text extracted from response. Response type: {type(response)}")
-            return "Unable to generate analysis due to an unexpected response format. Please try again or review the code manually."
+            # No text and no recognized finish reason: describe, don't diagnose.
+            raise BotInternalError(
+                "analysis", public_message=_empty_response_notice(response))
 
+        except BotInternalError:
+            raise
         except Exception as e:
             # Log the error and return safe info
             logging.error(f"Error processing Gemini response: {str(e)}")
             return f"Error processing response: {str(e)}\n\nResponse type: {type(response)}"
 
     except Exception as e:
-        error_msg = str(e).lower()
         context = (
             f" (PR: {pr_details.get('title', 'Unknown')}, Model: {model_name}, Diff length: {len(pr_details.get('diff', ''))})"
         )
-        if "quota" in error_msg or "rate limit" in error_msg or "billing" in error_msg:
-            logging.error(f"API quota/rate limit error{context}: {str(e)}")
-            return f"Error generating analysis: API quota exceeded{context}. Please check your billing or try again later."
-        elif "api key" in error_msg or "authentication" in error_msg or "unauthorized" in error_msg:
-            logging.error(f"API authentication error{context}: {str(e)}")
-            return f"Error generating analysis: Invalid API key or authentication failed{context}. Please check your GEMINI_API_KEY."
-        elif "model" in error_msg or "not found" in error_msg:
-            logging.error(f"Model error{context}: {str(e)}")
-            return f"Error generating analysis: Requested model not available{context}. Please try again later."
-        else:
-            logging.error(f"Unexpected API error{context}: {str(e)}")
-            return f"Error generating analysis: API unavailable{context}. Please try again later."
+        return classify_provider_error(e, context)
 
 
 def parse_diff_for_suggestions(diff_text):
@@ -1015,7 +1181,21 @@ def main():
 
     # Analyze PR with Gemini
     logging.info("Analyzing PR with Gemini...")
-    analysis = analyze_with_gemini(client, pr_details)
+    try:
+        analysis = analyze_with_gemini(client, pr_details)
+    except BotInternalError as e:
+        notice = e.public_message
+        if notice is None:
+            link = workflow_run_url()
+            notice = f"Bot error during {e.step}."
+            if link:
+                notice += f" See the workflow run: {link}."
+            notice += " No review was posted."
+        try:
+            post_comment_webhook(github_token, args.repo, pr_details, notice)
+        except Exception as post_e:
+            logging.error(f"Failed to post error notice: {post_e}")
+        sys.exit(1)
     logging.debug("Analysis response received")
     logging.debug(analysis)
 
