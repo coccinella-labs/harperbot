@@ -155,6 +155,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Force a fresh review even when the head SHA already has one.
+          # Set for /analyze comment events; PR events resolve normally.
+          HARPERBOT_FORCE: ${{ github.event_name == 'issue_comment' }}
         run: |
           # Verify installations
           echo "Node.js: $(node --version)"
