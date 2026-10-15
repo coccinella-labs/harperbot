@@ -111,7 +111,7 @@ jobs:
         run: |
           # Install Python dependencies
           python -m pip install --upgrade --no-cache-dir \
-            PyGithub python-dotenv PyYAML google-genai cerebras-cloud-sdk
+            PyGithub python-dotenv PyYAML google-genai==2.31.0 cerebras-cloud-sdk==1.91.0
 
           # Verify installations
           python --version

@@ -213,6 +213,53 @@ Provide a concise code review analysis in this format:
     return default_config
 
 
+class BotInternalError(Exception):
+    """Unexpected bot failure, as opposed to a provider error.
+
+    Carries the failing step. Callers post a short notice and exit
+    non-zero; raw detail stays in the run log only.
+    """
+
+    def __init__(self, step):
+        self.step = step
+        super().__init__(f"Bot error during {step}")
+
+
+def workflow_run_url():
+    """Actions run URL, or None outside Actions (e.g. webhook mode)."""
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if server and repo and run_id:
+        return f"{server}/{repo}/actions/runs/{run_id}"
+    return None
+
+
+def classify_provider_error(error, context):
+    """Map a provider SDK failure to a safe public message.
+
+    Classification is structural: HTTP status read from the exception
+    object, never message-text matching. Anything unrecognized raises
+    BotInternalError, which callers report as a bot error and exit
+    non-zero. Raw detail is logged here, in the run log only.
+    """
+    code = getattr(error, "code", getattr(error, "status_code", None))
+    if code in (401, 403):
+        logging.error(f"API authentication error{context}: {error}")
+        return ("Error generating analysis: Invalid API key or authentication"
+                f" failed{context}. Please check the provider API key.")
+    if code == 429:
+        logging.error(f"API quota/rate limit error{context}: {error}")
+        return (f"Error generating analysis: API quota exceeded{context}. "
+                f"Please check billing or try again later.")
+    if isinstance(code, int) and 500 <= code < 600:
+        logging.error(f"API server error{context}: {error}")
+        return (f"Error generating analysis: API unavailable{context}. "
+                f"Please try again later.")
+    logging.exception(f"Unexpected bot error during analysis{context}")
+    raise BotInternalError("analysis") from error
+
+
 def analyze_with_gemini(client, pr_details):
     """Analyze the PR using Gemini API."""
     try:
@@ -224,6 +271,11 @@ def analyze_with_gemini(client, pr_details):
         max_output_tokens = config.get("max_output_tokens", 4096)
         safety_settings = config.get("safety_settings", [])
         provider = config.get("provider", "gemini")
+        required_key = {"gemini": "GEMINI_API_KEY",
+                        "cerebras": "CEREBRAS_API_KEY"}[provider]
+        if not os.environ.get(required_key):
+            return (f"{required_key} is not set for provider {provider}. "
+                    f"Add it as a repository secret; no review was performed.")
 
         # Auto-select model based on PR complexity
         diff_length = len(pr_details["diff"])
@@ -268,8 +320,10 @@ def analyze_with_gemini(client, pr_details):
                     return f"Syntax error: {e}"
 
             tools = [
-                types.FunctionDeclaration(
-                    name="check_python_syntax",
+                types.Tool(
+                    function_declarations=[
+                        types.FunctionDeclaration(
+                            name="check_python_syntax",
                     description="Check Python code for syntax errors",
                     parameters={
                         "type": "object",
@@ -281,6 +335,8 @@ def analyze_with_gemini(client, pr_details):
                         },
                         "required": ["code"],
                     },
+                        )
+                    ],
                 )
             ]
 
@@ -409,22 +465,10 @@ def analyze_with_gemini(client, pr_details):
             return f"Error processing response: {str(e)}\n\nResponse type: {type(response)}"
 
     except Exception as e:
-        error_msg = str(e).lower()
         context = (
             f" (PR: {pr_details.get('title', 'Unknown')}, Model: {model_name}, Diff length: {len(pr_details.get('diff', ''))})"
         )
-        if "quota" in error_msg or "rate limit" in error_msg or "billing" in error_msg:
-            logging.error(f"API quota/rate limit error{context}: {str(e)}")
-            return f"Error generating analysis: API quota exceeded{context}. Please check your billing or try again later."
-        elif "api key" in error_msg or "authentication" in error_msg or "unauthorized" in error_msg:
-            logging.error(f"API authentication error{context}: {str(e)}")
-            return f"Error generating analysis: Invalid API key or authentication failed{context}. Please check your GEMINI_API_KEY."
-        elif "model" in error_msg or "not found" in error_msg:
-            logging.error(f"Model error{context}: {str(e)}")
-            return f"Error generating analysis: Requested model not available{context}. Please try again later."
-        else:
-            logging.error(f"Unexpected API error{context}: {str(e)}")
-            return f"Error generating analysis: API unavailable{context}. Please try again later."
+        return classify_provider_error(e, context)
 
 
 def parse_diff_for_suggestions(diff_text):
@@ -971,7 +1015,19 @@ def main():
 
     # Analyze PR with Gemini
     logging.info("Analyzing PR with Gemini...")
-    analysis = analyze_with_gemini(client, pr_details)
+    try:
+        analysis = analyze_with_gemini(client, pr_details)
+    except BotInternalError as e:
+        link = workflow_run_url()
+        notice = f"Bot error during {e.step}."
+        if link:
+            notice += f" See the workflow run: {link}."
+        notice += " No review was posted."
+        try:
+            post_comment_webhook(github_token, args.repo, pr_details, notice)
+        except Exception as post_e:
+            logging.error(f"Failed to post error notice: {post_e}")
+        sys.exit(1)
     logging.debug("Analysis response received")
     logging.debug(analysis)
 

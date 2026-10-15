@@ -16,13 +16,16 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "harperbot"))
 
 from harperbot import (  # noqa: E402
+    BotInternalError,
     analyze_with_gemini,
     apply_suggestions_to_pr,
     create_branch,
     find_diff_position,
     load_config,
+    classify_provider_error,
     parse_diff_for_suggestions,
     verify_webhook_signature,
+    workflow_run_url,
 )
 
 
@@ -62,8 +65,8 @@ class TestHarperBot(unittest.TestCase):
             self.assertIn("prompt", config)  # Should include default prompt
 
     @patch("harperbot.load_config")
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"})
     def test_analyze_with_gemini_success(self, mock_load_config):
-        """Test successful Gemini analysis."""
         # Mock config with all required keys
         mock_load_config.return_value = {
             "model": "gemini-2.0-flash",
@@ -242,6 +245,65 @@ class TestHarperBot(unittest.TestCase):
         # Should not create commit since suggestion is skipped
         self.assertFalse(mock_repo.create_git_commit.called)
 
+
+class TestErrorHandling(unittest.TestCase):
+    """Classifier, missing-key check, and request-shape construction."""
+
+    def _api_error(self, code):
+        from google.genai import errors
+        return errors.APIError(code, "resp", {"error": {"message": "m"}})
+
+    def test_auth_codes_map_to_auth_message(self):
+        for code in (401, 403):
+            msg = classify_provider_error(self._api_error(code), " (ctx)")
+            self.assertIn("Invalid API key or authentication failed", msg)
+            self.assertIn("(ctx)", msg)
+
+    def test_quota_code_maps_to_quota_message(self):
+        msg = classify_provider_error(self._api_error(429), "")
+        self.assertIn("quota exceeded", msg)
+
+    def test_server_codes_map_to_unavailable(self):
+        for code in (500, 503):
+            msg = classify_provider_error(self._api_error(code), "")
+            self.assertIn("API unavailable", msg)
+
+    def test_unknown_error_raises_internal(self):
+        with self.assertRaises(BotInternalError) as cm:
+            classify_provider_error(ValueError("weird"), "")
+        self.assertEqual(cm.exception.step, "analysis")
+
+    def test_missing_key_names_variable_not_value(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CEREBRAS_API_KEY", None)
+            with patch("harperbot.load_config",
+                       return_value={"provider": "cerebras"}):
+                msg = analyze_with_gemini(
+                    Mock(), {"diff": "", "files_changed": [], "title": "t"})
+                self.assertIn("CEREBRAS_API_KEY is not set", msg)
+                self.assertNotIn("sk-", msg)
+
+    def test_tools_request_shape_constructs(self):
+        from google.genai import types
+        tools = [types.Tool(function_declarations=[
+            types.FunctionDeclaration(name="f", description="d")])]
+        cfg = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="medium"),
+            max_output_tokens=100,
+            tools=tools,
+        )
+        self.assertEqual(cfg.thinking_config.thinking_level, "MEDIUM")
+
+    def test_run_url_present_and_absent(self):
+        with patch.dict(os.environ, {"GITHUB_SERVER_URL": "https://g.io",
+                                     "GITHUB_REPOSITORY": "o/r",
+                                     "GITHUB_RUN_ID": "1"}):
+            self.assertEqual(workflow_run_url(),
+                             "https://g.io/o/r/actions/runs/1")
+        with patch.dict(os.environ, {}, clear=False):
+            for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"):
+                os.environ.pop(k, None)
+            self.assertIsNone(workflow_run_url())
 
 if __name__ == "__main__":
     unittest.main()
