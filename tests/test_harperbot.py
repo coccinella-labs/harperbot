@@ -893,6 +893,43 @@ class TestReviewPostingFlag(unittest.TestCase):
                          "model_name": "m"},
                         self._analysis_with_suggestion())
                     self.assertTrue(sv.called)
+class TestCheckRunActions(unittest.TestCase):
+    """Re-run action present on create and edit, with the right identifier."""
+
+    def _repo(self):
+        from unittest.mock import Mock
+        repo = Mock()
+        commit = repo.get_commit.return_value
+        commit.get_check_runs.return_value = []
+        return repo
+
+    def test_create_carries_action(self):
+        from harperbot.harperbot import upsert_check_run
+        repo = self._repo()
+        upsert_check_run(repo, "abc1234", summary="s", conclusion="success",
+                         annotations=[], run_url=None)
+        _, kwargs = repo.create_check_run.call_args
+        actions = kwargs["actions"]
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["identifier"], "rerun-analysis")
+        self.assertTrue(actions[0]["label"])
+
+    def test_edit_preserves_action(self):
+        from unittest.mock import Mock
+        from harperbot.harperbot import upsert_check_run
+        repo = Mock()
+        existing = Mock()
+        repo.get_commit.return_value.get_check_runs.return_value = [existing]
+        upsert_check_run(repo, "abc1234", summary="s", conclusion="neutral",
+                         annotations=[], run_url=None)
+        _, kwargs = existing.edit.call_args
+        self.assertEqual(kwargs["actions"][0]["identifier"], "rerun-analysis")
+
+    def test_at_most_three_actions(self):
+        from harperbot.output import CHECK_RUN_ACTIONS
+        self.assertLessEqual(len(CHECK_RUN_ACTIONS), 3)
+        for action in CHECK_RUN_ACTIONS:
+            self.assertIn("identifier", action)
 
 if __name__ == "__main__":
     unittest.main()

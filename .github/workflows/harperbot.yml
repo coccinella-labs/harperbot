@@ -11,6 +11,8 @@ on:
     branches: [main]
   issue_comment:
     types: [created]
+  check_run:
+    types: [rerequested, requested_action]
   push:
     branches: [main]
 
@@ -93,6 +95,15 @@ jobs:
           fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
           github.event.comment.author_association
         )
+      ) ||
+      (
+        github.event_name == 'check_run' &&
+        github.event.check_run.name == 'HarperBot review' &&
+        (
+          github.event.action == 'rerequested' ||
+          github.event.requested_action.identifier == 'rerun-analysis'
+        ) &&
+        length(github.event.check_run.check_suite.pull_requests) > 0
       )
     runs-on: ubuntu-latest
     container: python:3.11-slim
@@ -115,7 +126,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.check_run.head_sha }}
           fetch-depth: 1
 
       # Install Python dependencies required for HarperBot
@@ -154,7 +165,7 @@ jobs:
           # Run the PR bot script with repository and PR number
           python ./src/harperbot/harperbot.py \
             --repo ${{ github.repository }} \
-            --pr ${{ github.event.pull_request.number || github.event.issue.number }}
+            --pr ${{ github.event.pull_request.number || github.event.issue.number || github.event.check_run.check_suite.pull_requests[0].number }}
 
       - name: Post inline suggestions
         uses: actions/github-script@v7

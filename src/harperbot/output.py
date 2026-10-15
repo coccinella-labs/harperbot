@@ -143,6 +143,15 @@ def sanitize_model_text(text, prose=True):
 
 CHECK_RUN_NAME = "HarperBot review"
 
+# At most three actions per check run. Re-running re-analyzes the same
+# commit through the normal pipeline; GitHub restricts button use to
+# accounts with write access, so no separate author check is needed.
+CHECK_RUN_ACTIONS = [
+    {"label": "Re-run analysis",
+     "description": "Run HarperBot analysis again on this commit",
+     "identifier": "rerun-analysis"},
+]
+
 # Annotation levels: notice and warning only. Never error/failure: the
 # Files-changed tab must not show red marks the conclusion won't back up.
 def _annotation_level(severity):

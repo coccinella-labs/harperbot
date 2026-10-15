@@ -1247,15 +1247,16 @@ def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations,
     first = chunks[0] if chunks else []
     output = {"title": "HarperBot review", "summary": summary,
               "annotations": first}
+    actions = _output.CHECK_RUN_ACTIONS
     if existing is None:
         check = repo.create_check_run(
             _output.CHECK_RUN_NAME, head_sha, status="completed",
             started_at=now, completed_at=now, conclusion=conclusion,
-            details_url=run_url, output=output)
+            details_url=run_url, output=output, actions=actions)
     else:
         existing.edit(status="completed", started_at=now, completed_at=now,
                        conclusion=conclusion, details_url=run_url,
-                       output=output)
+                       output=output, actions=actions)
         check = existing
     for extra in chunks[1:]:
         check.edit(output={"title": "HarperBot review", "summary": summary,
