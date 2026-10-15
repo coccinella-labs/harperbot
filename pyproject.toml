@@ -33,3 +33,8 @@ harperbot = ["config.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# The google-genai SDK reaches into a deprecated typing private on Python
+# 3.14. Dependency noise, not ours; revisit on SDK or Python upgrade.
+filterwarnings = [
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
+]
