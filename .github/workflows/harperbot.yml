@@ -16,7 +16,7 @@ on:
 
 # Package versions
 env:
-  GENERATIVE_AI_VERSION: 0.24.1
+  GENERATIVE_AI_VERSION: 2.30.0
 
 # Required permissions
 permissions:
