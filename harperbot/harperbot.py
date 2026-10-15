@@ -235,6 +235,24 @@ def workflow_run_url():
     return None
 
 
+def _is_transient_transport(error, code):
+    """True for timeouts and connection failures, which carry no status.
+
+    Builtin TimeoutError/ConnectionError cover sockets and most HTTP
+    stacks. The type-name fallback covers SDK transport errors such as
+    httpx.TimeoutException or Cerebras APITimeoutError/APIConnectionError,
+    which are not builtin subclasses. Matching is on the exception type,
+    never on message text. A network blip must read as transient, not as
+    a bot bug.
+    """
+    if code is not None:
+        return False
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return True
+    typename = type(error).__name__.lower()
+    return "timeout" in typename or "connect" in typename
+
+
 def classify_provider_error(error, context):
     """Map a provider SDK failure to a safe public message.
 
@@ -244,6 +262,14 @@ def classify_provider_error(error, context):
     non-zero. Raw detail is logged here, in the run log only.
     """
     code = getattr(error, "code", getattr(error, "status_code", None))
+    if _is_transient_transport(error, code):
+        logging.warning(f"API transport error{context}: {error}")
+        return (f"Error generating analysis: API temporarily unreachable{context}. "
+                f"Please try again later.")
+    if code in (400, 404):
+        logging.error(f"API model error{context}: {error}")
+        return (f"Error generating analysis: Requested model not available{context}. "
+                f"Please check the configured model.")
     if code in (401, 403):
         logging.error(f"API authentication error{context}: {error}")
         return ("Error generating analysis: Invalid API key or authentication"

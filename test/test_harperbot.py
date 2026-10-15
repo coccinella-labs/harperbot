@@ -268,6 +268,27 @@ class TestErrorHandling(unittest.TestCase):
             msg = classify_provider_error(self._api_error(code), "")
             self.assertIn("API unavailable", msg)
 
+    def test_unknown_model_codes_map_to_unavailable_model(self):
+        for code in (400, 404):
+            msg = classify_provider_error(self._api_error(code), "")
+            self.assertIn("Requested model not available", msg)
+
+    def test_transport_errors_are_transient_not_internal(self):
+        from cerebras.cloud.sdk._exceptions import (
+            APIConnectionError,
+            APITimeoutError,
+        )
+
+        class FakeTimeout(TimeoutError):
+            pass
+
+        request = Mock()
+        for err in (APITimeoutError(request=request),
+                    APIConnectionError(request=request),
+                    FakeTimeout("t"), ConnectionResetError("c")):
+            msg = classify_provider_error(err, "")
+            self.assertIn("temporarily unreachable", msg)
+
     def test_unknown_error_raises_internal(self):
         with self.assertRaises(BotInternalError) as cm:
             classify_provider_error(ValueError("weird"), "")
