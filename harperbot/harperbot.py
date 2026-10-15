@@ -474,7 +474,8 @@ def format_comment(analysis):
 
 </details>
 
----"""
+---
+{ANALYSIS_MARKER}"""
 
 
 def parse_code_suggestions(analysis):
@@ -858,6 +859,47 @@ def get_pr_details_webhook(g, repo_name, pr_number):
     }
 
 
+ANALYSIS_MARKER = "<!-- harperbot-analysis -->"
+
+# Matches bot comments written before the marker existed, so the first
+# upsert run adopts them instead of leaving them orphaned.
+LEGACY_ANALYSIS_SIGNATURE = "<summary>HarperBot Analysis</summary>"
+
+
+def find_existing_analysis_comments(pr):
+    """Return earlier bot analysis comments on this PR, oldest first."""
+    matches = []
+    for comment in pr.get_issue_comments():
+        body = comment.body or ""
+        if ANALYSIS_MARKER in body or (
+            LEGACY_ANALYSIS_SIGNATURE in body
+            and "harperbot/actions/workflows" in body
+        ):
+            matches.append(comment)
+    return matches
+
+
+def upsert_analysis_comment(pr, formatted_comment):
+    """Update the existing analysis comment, or post one if none exists.
+
+    One comment per PR no matter how many times the bot runs. Any extra
+    matches beyond the first are deleted, so concurrent runs converge
+    instead of accumulating.
+    """
+    existing = find_existing_analysis_comments(pr)
+    if not existing:
+        pr.create_issue_comment(formatted_comment)
+        logging.info(f"Posted main analysis comment to PR #{pr.number}")
+        return
+    existing[0].edit(formatted_comment)
+    logging.info(f"Updated main analysis comment to PR #{pr.number}")
+    for stale in existing[1:]:
+        try:
+            stale.delete()
+        except Exception as e:
+            logging.warning(f"Could not delete stale analysis comment: {e}")
+
+
 def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, analysis: str):
     """
     Post analysis comment and inline suggestions using GitHub App auth.
@@ -875,10 +917,9 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
         suggestions = parse_code_suggestions(analysis)
         main_comment = update_main_comment(analysis)
 
-        # Post main analysis comment
+        # Upsert the main analysis comment: one comment per PR.
         formatted_comment = format_comment(main_comment)
-        pr.create_issue_comment(formatted_comment)
-        logging.info(f"Posted main analysis comment to PR #{pr_details['number']}")
+        upsert_analysis_comment(pr, formatted_comment)
 
         # Post or save inline suggestions based on config
         post_in_yaml = config.get("post_suggestions_in_yaml", True)

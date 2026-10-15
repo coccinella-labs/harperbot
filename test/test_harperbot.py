@@ -16,12 +16,16 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "harperbot"))
 
 from harperbot import (  # noqa: E402
+    ANALYSIS_MARKER,
     analyze_with_gemini,
     apply_suggestions_to_pr,
     create_branch,
     find_diff_position,
     load_config,
+    find_existing_analysis_comments,
+    format_comment,
     parse_diff_for_suggestions,
+    upsert_analysis_comment,
     verify_webhook_signature,
 )
 
@@ -241,6 +245,53 @@ class TestHarperBot(unittest.TestCase):
 
         # Should not create commit since suggestion is skipped
         self.assertFalse(mock_repo.create_git_commit.called)
+
+
+    def test_format_comment_carries_marker(self):
+        """The marker is what later runs match on."""
+        self.assertIn(ANALYSIS_MARKER, format_comment("hello"))
+
+    def _comment(self, body):
+        c = Mock()
+        c.body = body
+        return c
+
+    def test_upsert_creates_when_none_exist(self):
+        pr = Mock()
+        pr.number = 1
+        pr.get_issue_comments.return_value = [self._comment("human words")]
+        upsert_analysis_comment(pr, "new body")
+        pr.create_issue_comment.assert_called_once_with("new body")
+
+    def test_upsert_edits_single_existing(self):
+        old = self._comment("analysis " + ANALYSIS_MARKER)
+        pr = Mock()
+        pr.number = 1
+        pr.get_issue_comments.return_value = [old]
+        upsert_analysis_comment(pr, "new body")
+        pr.create_issue_comment.assert_not_called()
+        old.edit.assert_called_once_with("new body")
+
+    def test_upsert_adopts_legacy_comment(self):
+        legacy = self._comment("<summary>HarperBot Analysis</summary> "
+                               "harperbot/actions/workflows stuff")
+        pr = Mock()
+        pr.number = 1
+        pr.get_issue_comments.return_value = [legacy]
+        self.assertEqual(find_existing_analysis_comments(pr), [legacy])
+        upsert_analysis_comment(pr, "new body")
+        legacy.edit.assert_called_once_with("new body")
+
+    def test_upsert_deletes_extras(self):
+        first = self._comment("one " + ANALYSIS_MARKER)
+        second = self._comment("two " + ANALYSIS_MARKER)
+        pr = Mock()
+        pr.number = 1
+        pr.get_issue_comments.return_value = [first, second]
+        upsert_analysis_comment(pr, "new body")
+        first.edit.assert_called_once_with("new body")
+        second.delete.assert_called_once_with()
+
 
 
 if __name__ == "__main__":
