@@ -1432,6 +1432,23 @@ def cmd_models(args):
     return 0
 
 
+def cmd_drift_check(args):
+    """Verify every configured default model against its live listing.
+
+    Exit 0 when all present or skipped, 1 when any default is absent or
+    a listing stays unreachable. Output is one STATUS line per provider
+    for the workflow to consume.
+    """
+    from harperbot.providers import check_model_drift
+    results = check_model_drift(load_config())
+    failed = False
+    for r in results:
+        status = "OK" if r["ok"] else "DRIFT"
+        print(f"{status} {r['provider']} {r['model']}: {r['detail']}")
+        failed = failed or not r["ok"]
+    return 1 if failed else 0
+
+
 def main():
     """Main function to run the PR bot."""
     # Parse command line arguments
@@ -1446,9 +1463,13 @@ def main():
     p_models = sub.add_parser("models", help="List models for a provider")
     p_models.add_argument("--provider", required=False, default=None,
                           help="Provider name (default: configured provider)")
+    sub.add_parser("drift-check",
+                   help="Verify configured default models still exist")
     args = parser.parse_args()
     if args.command == "models":
         sys.exit(cmd_models(args))
+    if args.command == "drift-check":
+        sys.exit(cmd_drift_check(args))
     if not args.repo or not args.pr:
         parser.error("--repo and --pr are required (or use the models command)")
 
