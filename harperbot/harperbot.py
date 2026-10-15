@@ -207,12 +207,12 @@ Provide a concise code review analysis in this format:
 End your response with a fenced JSON block listing each concrete problem
 found, so counts and inline comments can be derived without parsing prose:
 ```json
-{"summary": "one-paragraph overall assessment",
- "findings": [{"severity": "critical|high|medium|low|info",
+{{"summary": "one-paragraph overall assessment",
+ "findings": [{{"severity": "critical|high|medium|low|info",
    "category": "bug|security|performance|quality|style",
    "path": "relative/file.py", "line": 42,
    "message": "what is wrong, why, and the exact conditions that trigger it",
-   "suggestion": "optional concrete fix"}]}
+   "suggestion": "optional concrete fix"}}]}}
 ```
 An empty "findings" list is valid when nothing is wrong. Keep the
 human-readable review above; the JSON mirrors its actionable items."""
