@@ -22,7 +22,10 @@ from cerebras.cloud.sdk import Cerebras
 from dotenv import load_dotenv
 from github import Auth, Github
 from google.genai import types
-from harperbot_apply import handle_apply_comment
+try:
+    from .harperbot_apply import handle_apply_comment
+except ImportError:  # executed directly as a script
+    from harperbot_apply import handle_apply_comment
 
 # Flask imported conditionally for webhook mode
 flask_available = False

@@ -15,7 +15,6 @@ on:
 # Package versions
 env:
   GENERATIVE_AI_VERSION: 0.24.1
-  GEMINI_CLI_VERSION: 0.2.2
 
 # Required permissions
 permissions:
@@ -47,7 +46,7 @@ jobs:
       - name: Install Gemini CLI
         run: |
           # Install Node.js dependencies with pinned versions from environment
-          npm install -g @google/genai@latest
+          npm install -g @google/genai@${GENERATIVE_AI_VERSION}
 
           # Create Gemini CLI wrapper with proper module resolution and version fallback
           cat > /usr/local/bin/gemini-wrapper << 'EOL'
