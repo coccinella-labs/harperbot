@@ -99,7 +99,7 @@ HarperBot can now author code changes directly as a contributor to repositories:
 - Works alongside existing PR review process
 
 ### Configuration
-Set `enable_authoring: true` in `harperbot/config.yaml` and configure:
+Set `enable_authoring: true` in `src/harperbot/config.yaml` and configure:
 - `auto_commit_suggestions`: Apply suggestions directly to PRs
 - `create_improvement_prs`: Generate improvement PRs
 - `improvement_branch_pattern`: Naming pattern for improvement branches
@@ -109,9 +109,9 @@ Authoring features require write access to repositories. Ensure proper permissio
 
 ## Customization
 
-Modify `harperbot/config.yaml` to adjust:
+Modify `src/harperbot/config.yaml` to adjust:
 - Analysis focus: 'all', 'security', 'performance', 'quality'
-- Gemini model: 'gemini-2.0-flash', 'gemini-2.5-pro'
+- Gemini model: 'gemini-3.8-flash' (see `config.yaml` for all options)
 - Temperature and token limits
 - Authoring features (enable/disable auto-committing and improvement PRs)
 

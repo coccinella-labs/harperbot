@@ -50,7 +50,7 @@ This is the preferred mode for new installations. It uses a centralized deployme
 3. Analysis is posted directly without repository-specific setup
 
 ### CLI Mode
-Run manually: `python harperbot/harperbot.py --repo owner/repo --pr 123`
+Run manually: `python src/harperbot/harperbot.py --repo owner/repo --pr 123`
 
 *Note: The local webhook server uses Flask's development server, suitable for testing. For production self-hosting outside Vercel, use a WSGI server like Gunicorn.*
 
@@ -111,7 +111,7 @@ Authoring features require write access to repositories. Ensure proper permissio
 
 Modify `harperbot/config.yaml` to adjust:
 - Analysis focus: 'all', 'security', 'performance', 'quality'
-- Gemini model: 'gemini-2.0-flash', 'gemini-2.5-pro'
+- Gemini model: 'gemini-3.8-flash' (see `config.yaml` for all options)
 - Temperature and token limits
 - Authoring features (enable/disable auto-committing and improvement PRs)
 
