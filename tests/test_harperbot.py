@@ -769,7 +769,9 @@ class TestOutputPhase1(unittest.TestCase):
 
     def test_counts_line(self):
         from harperbot.output import counts_line, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        def mk(severity):
+            return Finding(severity=severity, category="c",
+                           path="p", line=1, message="m")
         self.assertEqual(counts_line([]), "no findings")
         self.assertEqual(counts_line([mk("high"), mk("high"), mk("low")]),
                          "2 high · 1 low")
@@ -779,7 +781,9 @@ class TestCheckRun(unittest.TestCase):
 
     def test_conclusion_never_failure(self):
         from harperbot.output import check_conclusion, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        def mk(severity):
+            return Finding(severity=severity, category="c",
+                           path="p", line=1, message="m")
         self.assertEqual(check_conclusion([], False), "success")
         self.assertEqual(check_conclusion([mk("low")], False), "neutral")
         self.assertEqual(check_conclusion([], True), "neutral")
@@ -825,7 +829,9 @@ class TestCheckRun(unittest.TestCase):
 
     def test_check_summary_shape(self):
         from harperbot.output import build_check_summary, Finding
-        mk = lambda s: Finding(severity=s, category="c", path="p", line=1, message="m")
+        def mk(severity):
+            return Finding(severity=severity, category="c",
+                           path="p", line=1, message="m")
         body = build_check_summary(commit_sha="abc1234", model="m",
                                    findings=[mk("high")],
                                    analysis="analysis text here")
