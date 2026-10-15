@@ -339,6 +339,14 @@ class TestErrorHandling(unittest.TestCase):
             msg = classify_provider_error(err, "")
             self.assertIn("temporarily unreachable", msg)
 
+    def test_httpx_protocol_error_is_transient(self):
+        """A mid-response disconnect is transport, not a bot bug."""
+        import httpx
+        from unittest.mock import Mock
+        err = httpx.RemoteProtocolError("gone", request=Mock())
+        msg = classify_provider_error(err, "")
+        self.assertIn("temporarily unreachable", msg)
+
     def test_unknown_error_raises_internal(self):
         with self.assertRaises(BotInternalError) as cm:
             classify_provider_error(ValueError("weird"), "")

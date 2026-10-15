@@ -244,19 +244,30 @@ def workflow_run_url():
     return None
 
 
+try:
+    import httpx as _httpx
+
+    _HTTPX_TRANSPORT_ERRORS = (_httpx.TransportError,)
+except ImportError:  # pragma: no cover - httpx ships with google-genai
+    _HTTPX_TRANSPORT_ERRORS = ()
+
+
 def _is_transient_transport(error, code):
     """True for timeouts and connection failures, which carry no status.
 
     Builtin TimeoutError/ConnectionError cover sockets and most HTTP
-    stacks. The type-name fallback covers SDK transport errors such as
-    httpx.TimeoutException or Cerebras APITimeoutError/APIConnectionError,
-    which are not builtin subclasses. Matching is on the exception type,
-    never on message text. A network blip must read as transient, not as
-    a bot bug.
+    stacks. httpx.TransportError covers its whole transport subtree
+    (timeouts, network errors, protocol errors such as a server that
+    disconnects mid-response). The type-name fallback covers SDK transport
+    errors such as Cerebras APITimeoutError/APIConnectionError, which are
+    neither. Matching is on the exception type, never on message text.
+    A network blip must read as transient, not as a bot bug.
     """
     if code is not None:
         return False
     if isinstance(error, (TimeoutError, ConnectionError)):
+        return True
+    if _HTTPX_TRANSPORT_ERRORS and isinstance(error, _HTTPX_TRANSPORT_ERRORS):
         return True
     typename = type(error).__name__.lower()
     return "timeout" in typename or "connect" in typename
