@@ -13,7 +13,7 @@
 focus: all
 
 # AI provider to use: 'gemini' or 'cerebras'
-provider: cerebras
+provider: gemini
 
 # Gemini model to use (if provider: gemini)
 # Available options: 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash',
