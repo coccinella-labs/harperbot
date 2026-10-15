@@ -572,5 +572,82 @@ class TestOpenRouterProvider(unittest.TestCase):
                     self.assertIn("Invalid API key or authentication failed", msg)
                     self.assertIn("openrouter", msg)
 
+class TestOpenRouterFallback(unittest.TestCase):
+    """Gemini primary with OpenRouter fallback on traffic errors."""
+
+    def _503(self):
+        from google.genai import errors
+        return errors.APIError(503, "resp", {"error": {"message": "x"}})
+
+    def _401(self):
+        from google.genai import errors
+        return errors.APIError(401, "resp", {"error": {"message": "x"}})
+
+    def _gemini_config(self):
+        return {
+            "provider": "gemini", "model": "gemini-3.8-flash", "focus": "all",
+            "max_diff_length": 4000, "max_output_tokens": 100,
+            "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+            "openrouter_model": "openrouter/auto",
+        }
+
+    def _details(self):
+        return {"diff": "d", "files_changed": ["f"], "title": "t"}
+
+    def test_fallback_returns_openrouter_text(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
+                                     "OPENROUTER_API_KEY": "k"}):
+            with patch("harperbot.load_config", return_value=self._gemini_config()):
+                with patch("harperbot.requests.post") as mp:
+                    resp = Mock()
+                    resp.json.return_value = {
+                        "model": "deepseek/deepseek-v4.1-flash",
+                        "choices": [{"message": {"content": "fallback review"}}]}
+                    mp.return_value = resp
+                    client = Mock()
+                    client.models.generate_content.side_effect = self._503()
+                    from harperbot import analyze_with_gemini
+                    out = analyze_with_gemini(client, self._details())
+                    self.assertEqual(out, "fallback review")
+
+    def test_auth_error_does_not_fallback(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
+                                     "OPENROUTER_API_KEY": "k"}):
+            with patch("harperbot.load_config", return_value=self._gemini_config()):
+                with patch("harperbot.requests.post") as mp:
+                    client = Mock()
+                    client.models.generate_content.side_effect = self._401()
+                    from harperbot import analyze_with_gemini
+                    msg = analyze_with_gemini(client, self._details())
+                    self.assertIn("Invalid API key", msg)
+                    mp.assert_not_called()
+
+    def test_no_fallback_without_key(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=False):
+            os.environ.pop("OPENROUTER_API_KEY", None)
+            with patch("harperbot.load_config", return_value=self._gemini_config()):
+                with patch("harperbot.requests.post") as mp:
+                    client = Mock()
+                    client.models.generate_content.side_effect = self._503()
+                    from harperbot import analyze_with_gemini
+                    msg = analyze_with_gemini(client, self._details())
+                    self.assertIn("API unavailable", msg)
+                    mp.assert_not_called()
+
+    def test_double_failure_names_both(self):
+        import requests
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k",
+                                     "OPENROUTER_API_KEY": "k"}):
+            with patch("harperbot.load_config", return_value=self._gemini_config()):
+                with patch("harperbot.requests.post") as mp:
+                    err_resp = Mock()
+                    err_resp.status_code = 503
+                    mp.side_effect = requests.HTTPError(response=err_resp)
+                    client = Mock()
+                    client.models.generate_content.side_effect = self._503()
+                    from harperbot import analyze_with_gemini
+                    msg = analyze_with_gemini(client, self._details())
+                    self.assertIn("both failed", msg)
+
 if __name__ == "__main__":
     unittest.main()

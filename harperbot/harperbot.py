@@ -374,6 +374,46 @@ def classify_provider_error(error, context):
     raise BotInternalError("analysis") from error
 
 
+def generate_openrouter(api_key, model_name, formatted_prompt, max_output_tokens):
+    """Call OpenRouter chat completions. Returns (content, resolved_model).
+
+    Raises requests.HTTPError with the response attached on HTTP failures,
+    so callers can map status codes structurally.
+    """
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}",
+                 "Content-Type": "application/json",
+                 "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
+                 "X-Title": "HarperBot"},
+        json={"model": model_name,
+              "messages": [{"role": "user",
+                            "content": formatted_prompt}],
+              "max_tokens": max_output_tokens},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    resolved = data.get("model", model_name)
+    logging.info(f"OpenRouter resolved model: {resolved}")
+    return data["choices"][0]["message"]["content"], resolved
+
+
+def _should_fallback_to_openrouter(error):
+    """True when a Gemini failure is traffic-class and worth retrying.
+
+    Only 429, 5xx, and transport errors qualify. Auth failures, missing
+    keys, and unknown models are configuration or caller problems that a
+    second provider will not fix, so they never trigger a fallback.
+    """
+    code = getattr(error, "code", getattr(error, "status_code", None))
+    if code == 429:
+        return True
+    if isinstance(code, int) and 500 <= code < 600:
+        return True
+    return _is_transient_transport(error, code)
+
+
 def analyze_with_gemini(client, pr_details):
     """Analyze the PR using Gemini API."""
     try:
@@ -463,19 +503,42 @@ def analyze_with_gemini(client, pr_details):
                     )
                 ]
 
-            # Generate content with config
-            response = client.models.generate_content(
-                model=model_name,
-                contents=formatted_prompt,
-                config=types.GenerateContentConfig(
+            # Generate content with config. On traffic-class failures,
+            # fall back to OpenRouter once when its key is configured, so
+            # one provider lagging does not sink the review.
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=formatted_prompt,
+                    config=types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(
                         thinking_level="medium"
                     ),
                     max_output_tokens=max_output_tokens,
                     safety_settings=safety_settings,
                     tools=tools,
-                ),
-            )
+                    ),
+                )
+            except Exception as gemini_error:
+                or_key = os.environ.get("OPENROUTER_API_KEY")
+                if or_key and _should_fallback_to_openrouter(gemini_error):
+                    or_model = config.get("openrouter_model", "openrouter/auto")
+                    logging.warning(
+                        f"Gemini failed ({type(gemini_error).__name__}), "
+                        f"trying OpenRouter model {or_model}")
+                    try:
+                        or_content, _ = generate_openrouter(
+                            or_key, or_model, formatted_prompt,
+                            max_output_tokens)
+                    except Exception as or_error:
+                        logging.error(f"OpenRouter fallback also failed: {or_error}")
+                        return ("Error generating analysis: API unavailable "
+                                f"(provider gemini model {model_name} and "
+                                f"OpenRouter model {or_model} both failed). "
+                                f"Please try again later.")
+                    response = SimpleNamespace(text=or_content, candidates=None)
+                else:
+                    raise
             log_api_usage(response, model_name, provider)
         elif provider == "cerebras":
             # Use Cerebras client
@@ -494,19 +557,8 @@ def analyze_with_gemini(client, pr_details):
         elif provider == "openrouter":
             api_key = os.environ.get("OPENROUTER_API_KEY")
             try:
-                resp = requests.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}",
-                             "Content-Type": "application/json",
-                             "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
-                             "X-Title": "HarperBot"},
-                    json={"model": model_name,
-                          "messages": [{"role": "user",
-                                        "content": formatted_prompt}],
-                          "max_tokens": max_output_tokens},
-                    timeout=120,
-                )
-                resp.raise_for_status()
+                content, _ = generate_openrouter(
+                    api_key, model_name, formatted_prompt, max_output_tokens)
             except requests.HTTPError as e:
                 code = (e.response.status_code
                         if e.response is not None else None)
@@ -519,10 +571,6 @@ def analyze_with_gemini(client, pr_details):
                             f"(provider openrouter, model {model_name}). "
                             f"Please check billing or try again later.")
                 raise
-            data = resp.json()
-            resolved = data.get("model", model_name)
-            logging.info(f"OpenRouter resolved model: {resolved}")
-            content = data["choices"][0]["message"]["content"]
             response = SimpleNamespace(text=content, candidates=None)
 
         # Check for function calls
