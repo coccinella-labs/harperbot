@@ -38,3 +38,16 @@ pythonpath = ["src"]
 filterwarnings = [
     "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning",
 ]
+
+[tool.ruff]
+line-length = 127
+
+[tool.ruff.lint]
+# Explicit because ruff's implicit default set grows between releases.
+# With no config here, bumping the hook silently changes what fails:
+# 0.17's defaults flag 127 findings across LOG, BLE, SIM, RUF and ISC on
+# code that 0.6 accepted. Several (BLE001, TRY004) would mean
+# restructuring the bot's error handling, which is a behavior change, not
+# a lint fix. Keep this list small and deliberate; widen it as its own
+# reviewed change.
+select = ["E4", "E7", "E9", "F"]
