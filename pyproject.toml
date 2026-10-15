@@ -24,5 +24,12 @@ dependencies = [
 harperbot = "harperbot.harperbot:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["harperbot*"]
+
+[tool.setuptools.package-data]
+harperbot = ["config.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
