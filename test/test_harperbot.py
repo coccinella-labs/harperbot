@@ -435,5 +435,42 @@ class TestErrorHandling(unittest.TestCase):
                 except BotInternalError as e:
                     self.assertIn("SAFETY", e.public_message)
 
+    def test_usage_logging_gemini_shape(self):
+        """Gemini usage object logs all counts including thinking tokens."""
+        from types import SimpleNamespace
+        from harperbot import log_api_usage
+        usage = SimpleNamespace(prompt_token_count=100, candidates_token_count=20,
+                                thoughts_token_count=3000, total_token_count=3120)
+        cand = SimpleNamespace(finish_reason="MAX_TOKENS")
+        resp = SimpleNamespace(usage_metadata=usage, candidates=[cand])
+        with self.assertLogs(level="INFO") as cm:
+            log_api_usage(resp, "m", "gemini")
+        line = " ".join(cm.output)
+        self.assertIn("thinking=3000", line)
+        self.assertIn("finish=MAX_TOKENS", line)
+        self.assertIn("model=m provider=gemini", line)
+
+    def test_usage_logging_openai_shape(self):
+        """Cerebras/OpenAI usage object: prompt/completion/total tokens."""
+        from types import SimpleNamespace
+        from harperbot import log_api_usage
+        usage = SimpleNamespace(prompt_tokens=50, completion_tokens=10,
+                                total_tokens=60)
+        choice = SimpleNamespace(finish_reason="stop")
+        resp = SimpleNamespace(usage=usage, choices=[choice])
+        with self.assertLogs(level="INFO") as cm:
+            log_api_usage(resp, "m", "cerebras")
+        line = " ".join(cm.output)
+        self.assertIn("prompt=50", line)
+        self.assertIn("finish=stop", line)
+
+    def test_usage_logging_never_fails(self):
+        """Absent or hostile shapes degrade to Nones, never raise."""
+        from unittest.mock import Mock
+        from harperbot import log_api_usage
+        log_api_usage(None, "m", "gemini")
+        log_api_usage(Mock(), "m", "gemini")
+        log_api_usage(object(), "m", "gemini")
+
 if __name__ == "__main__":
     unittest.main()

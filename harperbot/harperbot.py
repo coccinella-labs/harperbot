@@ -295,6 +295,46 @@ def describe_empty_response(response):
     return "; ".join(bits)
 
 
+def log_api_usage(response, model_name, provider):
+    """Log token counts and finish reason. Counts only, never content.
+
+    Fully defensive: usage shapes differ per provider and can be absent
+    on errors or blocked responses. A logging failure must never fail
+    a review, so the whole body is guarded.
+    """
+    try:
+        usage = getattr(response, "usage_metadata", None) or getattr(
+            response, "usage", None)
+
+        def _count(*names):
+            for name in names:
+                value = getattr(usage, name, None) if usage is not None else None
+                if isinstance(value, int):
+                    return value
+            return None
+
+        prompt = _count("prompt_token_count", "prompt_tokens")
+        candidates = _count("candidates_token_count", "completion_tokens")
+        thinking = _count("thoughts_token_count", "thinking_tokens")
+        total = _count("total_token_count", "total_tokens")
+        finish = None
+        for cand in getattr(response, "candidates", None) or []:
+            finish = getattr(cand, "finish_reason", None)
+            if finish is not None:
+                break
+        if finish is None:
+            for choice in getattr(response, "choices", None) or []:
+                finish = getattr(choice, "finish_reason", None)
+                if finish is not None:
+                    break
+        logging.info(
+            f"API usage model={model_name} provider={provider} "
+            f"prompt={prompt} candidates={candidates} thinking={thinking} "
+            f"total={total} finish={finish}")
+    except Exception as e:
+        logging.debug(f"Usage logging failed (non-fatal): {e}")
+
+
 def classify_provider_error(error, context):
     """Map a provider SDK failure to a safe public message.
 
@@ -427,6 +467,7 @@ def analyze_with_gemini(client, pr_details):
                     tools=tools,
                 ),
             )
+            log_api_usage(response, model_name, provider)
         elif provider == "cerebras":
             # Use Cerebras client
             cerebras_client = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
@@ -437,6 +478,7 @@ def analyze_with_gemini(client, pr_details):
                 temperature=temperature,
                 top_p=0.95,
             )
+            log_api_usage(response, model_name, provider)
             # Wrap response to mimic Gemini structure
             response.text = response.choices[0].message.content
             response.candidates = None  # No function calls for now

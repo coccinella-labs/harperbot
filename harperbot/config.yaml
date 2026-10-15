@@ -44,7 +44,7 @@ custom_functions: false
 
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
-max_output_tokens: 4096
+max_output_tokens: 8192
 
 # Safety settings for AI content filtering
 # Configure thresholds: BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE
