@@ -243,5 +243,56 @@ class TestHarperBot(unittest.TestCase):
         self.assertFalse(mock_repo.create_git_commit.called)
 
 
+class TestOpenRouterProvider(unittest.TestCase):
+    """OpenRouter branch: no network, requests.post mocked."""
+
+    def _config(self):
+        return {
+            "provider": "openrouter", "focus": "all",
+            "max_diff_length": 4000, "max_output_tokens": 100,
+            "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+        }
+
+    def _details(self):
+        return {"diff": "d", "files_changed": ["f"], "title": "t"}
+
+    def test_missing_key_names_variable(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENROUTER_API_KEY", None)
+            with patch("harperbot.load_config", return_value=self._config()):
+                from harperbot import analyze_with_gemini
+                msg = analyze_with_gemini(Mock(), self._details())
+                self.assertIn("OPENROUTER_API_KEY is not set", msg)
+
+    def test_success_returns_text_and_logs_resolved_model(self):
+        import requests
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
+            with patch("harperbot.load_config", return_value=self._config()):
+                with patch("harperbot.requests.post") as mp:
+                    resp = Mock()
+                    resp.json.return_value = {
+                        "model": "openai/gpt-5.2",
+                        "choices": [{"message": {"content": "looks good"}}]}
+                    mp.return_value = resp
+                    from harperbot import analyze_with_gemini
+                    out = analyze_with_gemini(Mock(), self._details())
+                    self.assertEqual(out, "looks good")
+                    body = mp.call_args[1]["json"]
+                    self.assertEqual(body["model"], "openai/gpt-5.2")
+                    self.assertEqual(body["messages"][0]["role"], "user")
+
+    def test_auth_failure_maps_to_auth_message(self):
+        import requests
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
+            with patch("harperbot.load_config", return_value=self._config()):
+                with patch("harperbot.requests.post") as mp:
+                    err_resp = Mock()
+                    err_resp.status_code = 401
+                    mp.side_effect = requests.HTTPError(response=err_resp)
+                    from harperbot import analyze_with_gemini
+                    msg = analyze_with_gemini(Mock(), self._details())
+                    self.assertIn("Invalid API key or authentication failed", msg)
+                    self.assertIn("openrouter", msg)
+
 if __name__ == "__main__":
     unittest.main()

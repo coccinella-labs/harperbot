@@ -37,6 +37,10 @@ max_diff_length: 4000
 # Lower values (0.0-0.3) for consistent, focused analysis; higher for more creative suggestions.
 temperature: 0.2
 
+# OpenRouter model to use (if provider: openrouter). Must be explicit:
+# there is no safe universal default while routing is unconfigured.
+openrouter_model: openai/gpt-5.2
+
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
 max_output_tokens: 4096
