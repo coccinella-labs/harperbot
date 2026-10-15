@@ -1047,5 +1047,76 @@ class TestProviders(unittest.TestCase):
             "o/r", {"model": "m"})
         self.assertIn("m via openrouter", body)
 
+class TestDriftCheck(unittest.TestCase):
+    """Drift detection: present, absent, unreachable, CLI codes."""
+
+    def _cfg(self):
+        return {"provider": "gemini", "provider_order": ["gemini"],
+                "model": "gemini-3.8-flash"}
+
+    def test_present_model_ok(self):
+        from harperbot import providers
+        with patch("harperbot.providers.list_models",
+                   return_value=["gemini-3.8-flash", "other"]):
+            [r] = providers.check_model_drift(
+                self._cfg(), ["gemini"], environ={})
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["model"], "gemini-3.8-flash")
+
+    def test_absent_model_drift(self):
+        from harperbot import providers
+        with patch("harperbot.providers.list_models",
+                   return_value=["other"]):
+            [r] = providers.check_model_drift(
+                self._cfg(), ["gemini"], environ={})
+            self.assertFalse(r["ok"])
+            self.assertIn("absent", r["detail"])
+
+    def test_unreachable_listing_retries_then_reports(self):
+        from harperbot import providers
+        calls = []
+        def flaky(*a, **k):
+            calls.append(1)
+            if len(calls) < 3:
+                raise RuntimeError("boom")
+            return ["gemini-3.8-flash"]
+        with patch("harperbot.providers.list_models", side_effect=flaky):
+            with patch("harperbot.providers.time.sleep") as sl:
+                [r] = providers.check_model_drift(
+                    self._cfg(), ["gemini"], environ={})
+                self.assertTrue(r["ok"])
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(sl.call_count, 2)
+
+    def test_persistent_failure_reports_unreachable(self):
+        from harperbot import providers
+        with patch("harperbot.providers.list_models",
+                   side_effect=RuntimeError("down")):
+            with patch("harperbot.providers.time.sleep"):
+                [r] = providers.check_model_drift(
+                    self._cfg(), ["gemini"], environ={})
+                self.assertFalse(r["ok"])
+                self.assertIn("unreachable", r["detail"])
+
+    def test_cli_exit_codes(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import Mock
+        from harperbot.harperbot import cmd_drift_check
+        with patch("harperbot.providers.check_model_drift",
+                   return_value=[{"provider": "g", "model": "m", "ok": True,
+                                  "detail": "present"}]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(cmd_drift_check(Mock()), 0)
+            self.assertIn("OK g m", buf.getvalue())
+        with patch("harperbot.providers.check_model_drift",
+                   return_value=[{"provider": "g", "model": "m", "ok": False,
+                                  "detail": "absent"}]):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(cmd_drift_check(Mock()), 1)
+            self.assertIn("DRIFT g m", buf.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

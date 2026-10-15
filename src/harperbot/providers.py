@@ -140,6 +140,62 @@ def validate_model(provider, model, api_key=None):
     return True
 
 
+def configured_default_model(provider, config):
+    """The model that would actually be called for this provider."""
+    if provider == "cerebras":
+        return config.get("cerebras_model", PROVIDERS["cerebras"]["default_model"])
+    if provider == "openrouter":
+        return config.get("openrouter_model", "openrouter/auto")
+    return config.get("model", PROVIDERS["gemini"]["default_model"])
+
+
+def check_model_drift(config, providers_to_check=None, attempts=3,
+                      environ=None):
+    """Check each provider's configured default against its live listing.
+
+    Returns a list of {provider, model, ok, detail}. Transient listing
+    failures are retried in-process; persistent absence is reported, never
+    raised. A provider with no key falls back to whatever list_models
+    provides (static for Cerebras) and says so in detail.
+    """
+    import os
+    import time
+    env = environ if environ is not None else os.environ
+    results = []
+    for name in providers_to_check or list(PROVIDERS):
+        if name not in PROVIDERS:
+            continue
+        model = configured_default_model(name, config)
+        key = env.get(PROVIDERS[name]["env_key"])
+        detail, ok = "", True
+        if not key:
+            detail = "no API key; checked against unauthenticated listing"
+        models = None
+        for attempt in range(attempts):
+            try:
+                models = list_models(name, key)
+                break
+            except Exception as e:
+                detail = (f"listing failed (attempt {attempt + 1}/{attempts}): "
+                          f"{type(e).__name__}")
+                if attempt < attempts - 1:
+                    time.sleep(10 * (attempt + 1))
+        if models is None:
+            results.append({"provider": name, "model": model, "ok": False,
+                            "detail": "listing unreachable: " + detail})
+            continue
+        detail = "" if key else detail
+        if not models:
+            detail = (detail + "; " if detail else "") + "listing empty, skipped"
+        elif model not in models:
+            ok, detail = False, f"{model} absent from live listing"
+        elif not detail:
+            detail = "present"
+        results.append({"provider": name, "model": model, "ok": ok,
+                        "detail": detail})
+    return results
+
+
 def match_allowed_patterns(model, patterns):
     """Client-side pattern check for validation only, not selection."""
     import fnmatch as _fn
