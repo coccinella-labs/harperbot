@@ -54,11 +54,7 @@ class Finding:
             raise ValueError("category must be a non-empty string")
         if not self.path or not isinstance(self.path, str):
             raise ValueError("path must be a non-empty string")
-        if self.line is not None and (
-            not isinstance(self.line, int)
-            or isinstance(self.line, bool)
-            or self.line < 1
-        ):
+        if self.line is not None and (not isinstance(self.line, int) or isinstance(self.line, bool) or self.line < 1):
             raise ValueError(f"line must be a positive int or null, got {self.line!r}")
         if not self.message or not isinstance(self.message, str):
             raise ValueError("message must be a non-empty string")
@@ -84,9 +80,7 @@ def parse_findings(text):
         payload = json.loads(match.group(1))
     except (json.JSONDecodeError, ValueError):
         return None, [], False
-    if not isinstance(payload, dict) or not isinstance(
-        payload.get("findings"), list
-    ):
+    if not isinstance(payload, dict) or not isinstance(payload.get("findings"), list):
         return None, [], False
     findings = []
     try:
@@ -147,10 +141,9 @@ CHECK_RUN_NAME = "HarperBot review"
 # commit through the normal pipeline; GitHub restricts button use to
 # accounts with write access, so no separate author check is needed.
 CHECK_RUN_ACTIONS = [
-    {"label": "Re-run analysis",
-     "description": "Run HarperBot analysis again",
-     "identifier": "rerun-analysis"},
+    {"label": "Re-run analysis", "description": "Run HarperBot analysis again", "identifier": "rerun-analysis"},
 ]
+
 
 # Annotation levels: notice and warning only. Never error/failure: the
 # Files-changed tab must not show red marks the conclusion won't back up.
@@ -226,7 +219,7 @@ def finding_to_annotation(finding):
 
 def chunk_annotations(annotations, size=50):
     """Split into API-sized batches (50 per request)."""
-    return [annotations[i:i + size] for i in range(0, len(annotations), size)]
+    return [annotations[i : i + size] for i in range(0, len(annotations), size)]
 
 
 def check_conclusion(findings, failed):
@@ -236,15 +229,17 @@ def check_conclusion(findings, failed):
     return "success"
 
 
-def build_check_summary(*, commit_sha, model, findings, analysis,
-                        failed=False, run_url=None):
+def build_check_summary(*, commit_sha, model, findings, analysis, failed=False, run_url=None):
     """Check-run summary markdown. Long tail in <details>."""
-    head = [f"Reviewed `{commit_sha[:7]}` · {model or 'unknown model'} · "
-            f"{counts_line(findings)}"]
+    head = [f"Reviewed `{commit_sha[:7]}` · {model or 'unknown model'} · " f"{counts_line(findings)}"]
     if failed:
         head.append("This run did not complete; results below are partial.")
-    return ("\n".join(head) + "\n\n<details>\n<summary>Full analysis</summary>\n\n"
-            + sanitize_model_text(analysis) + "\n\n</details>")
+    return (
+        "\n".join(head)
+        + "\n\n<details>\n<summary>Full analysis</summary>\n\n"
+        + sanitize_model_text(analysis)
+        + "\n\n</details>"
+    )
 
 
 def counts_line(findings):
@@ -261,8 +256,7 @@ def counts_line(findings):
 
 def render_metadata_line(commit_sha, commit_url, model, findings, focus="all"):
     """Single metadata line: linked short SHA, resolved model, counts."""
-    bits = [f"Reviewed [`{commit_sha[:7]}`]({commit_url})", model or "unknown model",
-            counts_line(findings)]
+    bits = [f"Reviewed [`{commit_sha[:7]}`]({commit_url})", model or "unknown model", counts_line(findings)]
     if focus and focus != "all":
         bits.append(f"focus: {focus}")
     return " · ".join(bits)
@@ -270,10 +264,7 @@ def render_metadata_line(commit_sha, commit_url, model, findings, focus="all"):
 
 def render_marker(shown_sha, attempted_sha, status):
     """Extended sticky marker. Parsed back by parse_marker."""
-    return (
-        f"<!-- harperbot:summary shown:{shown_sha} "
-        f"attempted:{attempted_sha} status:{status} -->"
-    )
+    return f"<!-- harperbot:summary shown:{shown_sha} " f"attempted:{attempted_sha} status:{status} -->"
 
 
 def parse_marker(body):
@@ -311,21 +302,15 @@ def format_review_comment(
         safe_analysis,
         "",
     ]
-    footer = "".join(
-        f"[{label}]({url})"
-        for label, url in (("workflow run", run_url), ("check run", check_url))
-        if url)
+    footer = "".join(f"[{label}]({url})" for label, url in (("workflow run", run_url), ("check run", check_url)) if url)
     if footer:
         lines.append(f"<sub>{footer}</sub>")
         lines.append("")
-    lines.append(
-        render_marker(commit_sha, commit_sha, "ok")
-    )
+    lines.append(render_marker(commit_sha, commit_sha, "ok"))
     return "\n".join(lines)
 
 
-def format_fallback_comment(*, analysis, commit_sha, commit_url, model,
-                            run_url=None, focus="all", check_url=None):
+def format_fallback_comment(*, analysis, commit_sha, commit_url, model, run_url=None, focus="all", check_url=None):
     """Parse failure: raw analysis inside <details> with an explicit note."""
     safe_analysis = sanitize_model_text(analysis)
     lines = [
@@ -344,16 +329,11 @@ def format_fallback_comment(*, analysis, commit_sha, commit_url, model,
         "</details>",
         "",
     ]
-    footer = "".join(
-        f"[{label}]({url})"
-        for label, url in (("workflow run", run_url), ("check run", check_url))
-        if url)
+    footer = "".join(f"[{label}]({url})" for label, url in (("workflow run", run_url), ("check run", check_url)) if url)
     if footer:
         lines.append(f"<sub>{footer}</sub>")
         lines.append("")
-    lines.append(
-        render_marker(commit_sha, commit_sha, "ok")
-    )
+    lines.append(render_marker(commit_sha, commit_sha, "ok"))
     return "\n".join(lines)
 
 
@@ -361,8 +341,7 @@ def format_failure_notice(*, attempted_sha, run_url=None):
     """Short plain notice for failed-with-no-prior-review. No badge, no
     details shell, so it cannot pass for a review."""
     lines = [
-        "HarperBot could not review "
-        f"`{attempted_sha[:7]}`.",
+        "HarperBot could not review " f"`{attempted_sha[:7]}`.",
     ]
     if run_url:
         lines[0] += f" ([workflow run]({run_url}))"
@@ -380,9 +359,7 @@ def apply_failure_banner(*, body, attempted_sha, run_url=None):
     out = []
     replaced_banner = False
     for line in lines:
-        if not replaced_banner and (
-            line.startswith("Reviewed [`") or line.startswith("Last run failed")
-        ):
+        if not replaced_banner and (line.startswith("Reviewed [`") or line.startswith("Last run failed")):
             out.append(banner)
             replaced_banner = True
         elif MARKER_RE.search(line):

@@ -48,6 +48,7 @@ def resolve_provider(config, environ=None):
     """Return (name, env_key, error). Auto picks the first provider in
     provider_order whose key is set; a specific unknown name is an error."""
     import os
+
     env = environ if environ is not None else os.environ
     wanted = config.get("provider", "gemini")
     if wanted != "auto":
@@ -58,9 +59,11 @@ def resolve_provider(config, environ=None):
     for name in order:
         if name in PROVIDERS and env.get(PROVIDERS[name]["env_key"]):
             return name, PROVIDERS[name]["env_key"], None
-    return None, None, ("No provider API key configured. Set one of: " +
-                        ", ".join(PROVIDERS[n]["env_key"] for n in order
-                                  if n in PROVIDERS))
+    return (
+        None,
+        None,
+        ("No provider API key configured. Set one of: " + ", ".join(PROVIDERS[n]["env_key"] for n in order if n in PROVIDERS)),
+    )
 
 
 def resolve_model(provider, config):
@@ -94,6 +97,7 @@ def list_models(provider, api_key=None):
 
 def _list_openrouter():
     import requests
+
     resp = requests.get("https://openrouter.ai/api/v1/models", timeout=30)
     resp.raise_for_status()
     return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
@@ -101,6 +105,7 @@ def _list_openrouter():
 
 def _list_gemini(api_key):
     from google.genai import Client
+
     client = Client(api_key=api_key) if api_key else Client()
     return [m.name.replace("models/", "") for m in client.models.list()]
 
@@ -111,15 +116,14 @@ def _list_cerebras(api_key):
     if api_key:
         try:
             import requests
+
             resp = requests.get(
-                "https://api.cerebras.ai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+                "https://api.cerebras.ai/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=30
+            )
             resp.raise_for_status()
-            return [m["id"] for m in resp.json().get("data", [])
-                    if m.get("id")]
+            return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
         except Exception as e:
-            logging.warning(f"Cerebras model listing failed, using static "
-                            f"list: {e}")
+            logging.warning(f"Cerebras model listing failed, using static " f"list: {e}")
     return ["gpt-oss-120b"]
 
 
@@ -128,15 +132,13 @@ def validate_model(provider, model, api_key=None):
     try:
         models = list_models(provider, api_key)
     except Exception as e:
-        logging.warning(f"Model listing for {provider} failed, skipping "
-                        f"validation: {e}")
+        logging.warning(f"Model listing for {provider} failed, skipping " f"validation: {e}")
         return True
     if not models:
         return True
     if model in models:
         return True
-    logging.warning(f"Model {model} not in {provider} listing; proceeding "
-                    f"anyway")
+    logging.warning(f"Model {model} not in {provider} listing; proceeding " f"anyway")
     return True
 
 
@@ -149,8 +151,7 @@ def configured_default_model(provider, config):
     return config.get("model", PROVIDERS["gemini"]["default_model"])
 
 
-def check_model_drift(config, providers_to_check=None, attempts=3,
-                      environ=None):
+def check_model_drift(config, providers_to_check=None, attempts=3, environ=None):
     """Check each provider's configured default against its live listing.
 
     Returns a list of {provider, model, ok, detail}. Transient listing
@@ -160,6 +161,7 @@ def check_model_drift(config, providers_to_check=None, attempts=3,
     """
     import os
     import time
+
     env = environ if environ is not None else os.environ
     results = []
     for name in providers_to_check or list(PROVIDERS):
@@ -176,13 +178,11 @@ def check_model_drift(config, providers_to_check=None, attempts=3,
                 models = list_models(name, key)
                 break
             except Exception as e:
-                detail = (f"listing failed (attempt {attempt + 1}/{attempts}): "
-                          f"{type(e).__name__}")
+                detail = f"listing failed (attempt {attempt + 1}/{attempts}): " f"{type(e).__name__}"
                 if attempt < attempts - 1:
                     time.sleep(10 * (attempt + 1))
         if models is None:
-            results.append({"provider": name, "model": model, "ok": False,
-                            "detail": "listing unreachable: " + detail})
+            results.append({"provider": name, "model": model, "ok": False, "detail": "listing unreachable: " + detail})
             continue
         detail = "" if key else detail
         if not models:
@@ -191,14 +191,14 @@ def check_model_drift(config, providers_to_check=None, attempts=3,
             ok, detail = False, f"{model} absent from live listing"
         elif not detail:
             detail = "present"
-        results.append({"provider": name, "model": model, "ok": ok,
-                        "detail": detail})
+        results.append({"provider": name, "model": model, "ok": ok, "detail": detail})
     return results
 
 
 def match_allowed_patterns(model, patterns):
     """Client-side pattern check for validation only, not selection."""
     import fnmatch as _fn
+
     return any(_fn.fnmatchcase(model, p) for p in (patterns or []))
 
 
@@ -211,12 +211,13 @@ def openrouter_plugins(config, model_name):
     if model_name != "openrouter/auto":
         return None
     section = config.get("openrouter", {})
-    plugins = [{
-        "id": "auto-router",
-        "allowed_models": section.get("allowed_models",
-                                     ["anthropic/*", "google/*"]),
-        "cost_tier": section.get("cost_tier", "medium"),
-    }]
+    plugins = [
+        {
+            "id": "auto-router",
+            "allowed_models": section.get("allowed_models", ["anthropic/*", "google/*"]),
+            "cost_tier": section.get("cost_tier", "medium"),
+        }
+    ]
     excluded = section.get("excluded_models")
     if excluded:
         plugins[0]["excluded_models"] = excluded

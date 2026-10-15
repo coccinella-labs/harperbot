@@ -25,6 +25,7 @@ from cerebras.cloud.sdk import Cerebras
 from dotenv import load_dotenv
 from github import Auth, Github
 from google.genai import types
+
 try:
     from .harperbot_apply import handle_apply_comment
 except ImportError:  # executed directly as a script
@@ -337,8 +338,7 @@ def describe_empty_response(response):
                 kind = "other"
             if kind not in kinds:
                 kinds.append(kind)
-    block = getattr(getattr(response, "prompt_feedback", None),
-                    "block_reason", None)
+    block = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
     bits = []
     if reasons:
         bits.append("finish reason: " + ", ".join(reasons))
@@ -356,8 +356,7 @@ def log_api_usage(response, model_name, provider):
     a review, so the whole body is guarded.
     """
     try:
-        usage = getattr(response, "usage_metadata", None) or getattr(
-            response, "usage", None)
+        usage = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
 
         def _count(*names):
             for name in names:
@@ -383,7 +382,8 @@ def log_api_usage(response, model_name, provider):
         logging.info(
             f"API usage model={model_name} provider={provider} "
             f"prompt={prompt} candidates={candidates} thinking={thinking} "
-            f"total={total} finish={finish}")
+            f"total={total} finish={finish}"
+        )
     except Exception as e:
         logging.debug(f"Usage logging failed (non-fatal): {e}")
 
@@ -401,47 +401,43 @@ def classify_provider_error(error, context):
     code = getattr(error, "code", getattr(error, "status_code", None))
     if _is_transient_transport(error, code):
         logging.warning(f"API transport error{context}: {error}")
-        return (f"Error generating analysis: API temporarily unreachable{context}. "
-                f"Please try again later.")
+        return f"Error generating analysis: API temporarily unreachable{context}. " f"Please try again later."
     if code in (400, 404):
         logging.error(f"API model error{context}: {error}")
-        return (f"Error generating analysis: Requested model not available{context}. "
-                f"Please check the configured model.")
+        return f"Error generating analysis: Requested model not available{context}. " f"Please check the configured model."
     if code in (401, 403):
         logging.error(f"API authentication error{context}: {error}")
-        return ("Error generating analysis: Invalid API key or authentication"
-                f" failed{context}. Please check the provider API key.")
+        return (
+            "Error generating analysis: Invalid API key or authentication"
+            f" failed{context}. Please check the provider API key."
+        )
     if code == 429:
         logging.error(f"API quota/rate limit error{context}: {error}")
-        return (f"Error generating analysis: API quota exceeded{context}. "
-                f"Please check billing or try again later.")
+        return f"Error generating analysis: API quota exceeded{context}. " f"Please check billing or try again later."
     if isinstance(code, int) and 500 <= code < 600:
         logging.error(f"API server error{context}: {error}")
-        return (f"Error generating analysis: API unavailable{context}. "
-                f"Please try again later.")
+        return f"Error generating analysis: API unavailable{context}. " f"Please try again later."
     logging.exception(f"Unexpected bot error during analysis{context}")
     raise BotInternalError("analysis") from error
 
 
-def generate_openrouter(api_key, model_name, formatted_prompt, max_output_tokens,
-                        plugins=None):
+def generate_openrouter(api_key, model_name, formatted_prompt, max_output_tokens, plugins=None):
     """Call OpenRouter chat completions. Returns (content, resolved_model).
 
     Raises requests.HTTPError with the response attached on HTTP failures,
     so callers can map status codes structurally.
     """
-    body = {"model": model_name,
-            "messages": [{"role": "user",
-                          "content": formatted_prompt}],
-            "max_tokens": max_output_tokens}
+    body = {"model": model_name, "messages": [{"role": "user", "content": formatted_prompt}], "max_tokens": max_output_tokens}
     if plugins:
         body["plugins"] = plugins
     resp = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json",
-                 "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
-                 "X-Title": "HarperBot"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
+            "X-Title": "HarperBot",
+        },
         json=body,
         timeout=120,
     )
@@ -483,8 +479,7 @@ def analyze_with_gemini(client, pr_details):
                 raise ValueError(f"Unsupported provider: {config.get('provider')}")
             return resolve_error + "; no review was performed."
         if not os.environ.get(env_key):
-            return (f"{env_key} is not set for provider {provider}. "
-                    f"Add it as a repository secret; no review was performed.")
+            return f"{env_key} is not set for provider {provider}. " f"Add it as a repository secret; no review was performed."
 
         # Auto-select model based on PR complexity
         diff_length = len(pr_details["diff"])
@@ -494,8 +489,7 @@ def analyze_with_gemini(client, pr_details):
             model_name = _providers.PROVIDERS["gemini"]["default_model"]
         else:
             model_name = _providers.resolve_model(provider, config)
-        _providers.validate_model(provider, model_name,
-                                  os.environ.get(env_key))
+        _providers.validate_model(provider, model_name, os.environ.get(env_key))
         pr_details["model_name"] = model_name
         pr_details["provider_name"] = provider
 
@@ -537,17 +531,17 @@ def analyze_with_gemini(client, pr_details):
                         function_declarations=[
                             types.FunctionDeclaration(
                                 name="check_python_syntax",
-                        description="Check Python code for syntax errors",
-                        parameters={
-                            "type": "object",
-                            "properties": {
-                                "code": {
-                                    "type": "string",
-                                    "description": "The Python code to check",
-                                }
-                            },
-                            "required": ["code"],
-                        },
+                                description="Check Python code for syntax errors",
+                                parameters={
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "string",
+                                            "description": "The Python code to check",
+                                        }
+                                    },
+                                    "required": ["code"],
+                                },
                             )
                         ],
                     )
@@ -561,33 +555,34 @@ def analyze_with_gemini(client, pr_details):
                     model=model_name,
                     contents=formatted_prompt,
                     config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level="medium"
-                    ),
-                    max_output_tokens=max_output_tokens,
-                    safety_settings=safety_settings,
-                    tools=tools,
+                        thinking_config=types.ThinkingConfig(thinking_level="medium"),
+                        max_output_tokens=max_output_tokens,
+                        safety_settings=safety_settings,
+                        tools=tools,
                     ),
                 )
             except Exception as gemini_error:
                 or_key = os.environ.get("OPENROUTER_API_KEY")
                 if or_key and _should_fallback_to_openrouter(gemini_error):
                     or_model = config.get("openrouter_model", "openrouter/auto")
-                    logging.warning(
-                        f"Gemini failed ({type(gemini_error).__name__}), "
-                        f"trying OpenRouter model {or_model}")
+                    logging.warning(f"Gemini failed ({type(gemini_error).__name__}), " f"trying OpenRouter model {or_model}")
                     try:
                         or_content, or_resolved = generate_openrouter(
-                            or_key, or_model, formatted_prompt,
+                            or_key,
+                            or_model,
+                            formatted_prompt,
                             max_output_tokens,
-                            _providers.openrouter_plugins(config, or_model))
+                            _providers.openrouter_plugins(config, or_model),
+                        )
                         pr_details["model_name"] = or_resolved
                     except Exception as or_error:
                         logging.error(f"OpenRouter fallback also failed: {or_error}")
-                        return ("Error generating analysis: API unavailable "
-                                f"(provider gemini model {model_name} and "
-                                f"OpenRouter model {or_model} both failed). "
-                                f"Please try again later.")
+                        return (
+                            "Error generating analysis: API unavailable "
+                            f"(provider gemini model {model_name} and "
+                            f"OpenRouter model {or_model} both failed). "
+                            f"Please try again later."
+                        )
                     response = SimpleNamespace(text=or_content, candidates=None)
                 else:
                     raise
@@ -610,20 +605,23 @@ def analyze_with_gemini(client, pr_details):
             api_key = os.environ.get("OPENROUTER_API_KEY")
             try:
                 content, resolved = generate_openrouter(
-                    api_key, model_name, formatted_prompt, max_output_tokens,
-                    _providers.openrouter_plugins(config, model_name))
+                    api_key, model_name, formatted_prompt, max_output_tokens, _providers.openrouter_plugins(config, model_name)
+                )
                 pr_details["model_name"] = resolved
             except requests.HTTPError as e:
-                code = (e.response.status_code
-                        if e.response is not None else None)
+                code = e.response.status_code if e.response is not None else None
                 if code in (401, 403):
-                    return ("Error generating analysis: Invalid API key or "
-                            f"authentication failed (provider openrouter, model "
-                            f"{model_name}). Please check OPENROUTER_API_KEY.")
+                    return (
+                        "Error generating analysis: Invalid API key or "
+                        f"authentication failed (provider openrouter, model "
+                        f"{model_name}). Please check OPENROUTER_API_KEY."
+                    )
                 if code in (402, 429):
-                    return ("Error generating analysis: API quota exceeded "
-                            f"(provider openrouter, model {model_name}). "
-                            f"Please check billing or try again later.")
+                    return (
+                        "Error generating analysis: API quota exceeded "
+                        f"(provider openrouter, model {model_name}). "
+                        f"Please check billing or try again later."
+                    )
                 raise
             response = SimpleNamespace(text=content, candidates=None)
 
@@ -632,8 +630,7 @@ def analyze_with_gemini(client, pr_details):
             for part in response.candidates[0].content.parts:
                 call = getattr(part, "function_call", None)
                 if call is not None:
-                    logging.info(
-                        f"Function call detected: {getattr(call, 'name', '?')}")
+                    logging.info(f"Function call detected: {getattr(call, 'name', '?')}")
                     # For now, just log; full handling would execute and send back
 
         # Handle different response formats
@@ -715,13 +712,10 @@ def analyze_with_gemini(client, pr_details):
                         elif "SAFETY" in str(finish_reason):
                             return "Analysis blocked due to content safety filters. Please ensure the PR content complies with usage policies."
                         elif "STOP" in str(finish_reason):
-                            raise BotInternalError(
-                                "analysis",
-                                public_message=_empty_response_notice(response))
+                            raise BotInternalError("analysis", public_message=_empty_response_notice(response))
 
             # No text and no recognized finish reason: describe, don't diagnose.
-            raise BotInternalError(
-                "analysis", public_message=_empty_response_notice(response))
+            raise BotInternalError("analysis", public_message=_empty_response_notice(response))
 
         except BotInternalError:
             raise
@@ -1169,20 +1163,18 @@ def find_existing_analysis_comments(pr, bot_login=None):
     matches = []
     for comment in pr.get_issue_comments():
         body = comment.body or ""
-        marked = (_output.parse_marker(body) is not None or (
-            ANALYSIS_MARKER in body
-            or (
-                LEGACY_ANALYSIS_SIGNATURE in body
-                and "harperbot/actions/workflows" in body
-            )
-        ))
+        marked = _output.parse_marker(body) is not None or (
+            ANALYSIS_MARKER in body or (LEGACY_ANALYSIS_SIGNATURE in body and "harperbot/actions/workflows" in body)
+        )
         if not marked:
             continue
         if bot_login is not None:
             try:
-                author = (comment.user or {}).get("login", "") \
-                    if isinstance(comment.user, dict) \
+                author = (
+                    (comment.user or {}).get("login", "")
+                    if isinstance(comment.user, dict)
                     else getattr(comment.user, "login", "")
+                )
             except Exception:
                 author = ""
             if author != bot_login:
@@ -1206,9 +1198,7 @@ def resolve_bot_login(g):
     try:
         return g.get_user().login
     except Exception as e:
-        logging.warning(
-            f"Bot login unresolved ({type(e).__name__}); author checks "
-            "will be skipped.")
+        logging.warning(f"Bot login unresolved ({type(e).__name__}); author checks " "will be skipped.")
         return None
 
 
@@ -1255,8 +1245,7 @@ def upsert_analysis_comment(pr, formatted_comment):
             logging.warning(f"Could not delete stale analysis comment: {e}")
 
 
-def build_review_comment(analysis, pr_details, repo_name, config,
-                         check_url=None):
+def build_review_comment(analysis, pr_details, repo_name, config, check_url=None):
     """Assemble the sticky review comment through one pipeline.
 
     Returns (body, ok). ok=False means the findings block was missing
@@ -1271,14 +1260,31 @@ def build_review_comment(analysis, pr_details, repo_name, config,
     run_url = workflow_run_url()
     summary, findings, ok = _output.parse_findings(analysis)
     if ok:
-        return _output.format_review_comment(
-            analysis=analysis, findings=findings, commit_sha=commit_sha,
-            commit_url=commit_url, model=model, run_url=run_url,
-            focus=focus, check_url=check_url), True
-    return _output.format_fallback_comment(
-        analysis=analysis, commit_sha=commit_sha, commit_url=commit_url,
-        model=model, run_url=run_url, focus=focus,
-        check_url=check_url), False
+        return (
+            _output.format_review_comment(
+                analysis=analysis,
+                findings=findings,
+                commit_sha=commit_sha,
+                commit_url=commit_url,
+                model=model,
+                run_url=run_url,
+                focus=focus,
+                check_url=check_url,
+            ),
+            True,
+        )
+    return (
+        _output.format_fallback_comment(
+            analysis=analysis,
+            commit_sha=commit_sha,
+            commit_url=commit_url,
+            model=model,
+            run_url=run_url,
+            focus=focus,
+            check_url=check_url,
+        ),
+        False,
+    )
 
 
 def record_failure(pr, attempted_sha, run_url):
@@ -1286,17 +1292,14 @@ def record_failure(pr, attempted_sha, run_url):
     for comment in pr.get_issue_comments():
         body = comment.body or ""
         if _output.parse_marker(body) is not None or _output.find_legacy(body):
-            comment.edit(_output.apply_failure_banner(
-                body=body, attempted_sha=attempted_sha, run_url=run_url))
+            comment.edit(_output.apply_failure_banner(body=body, attempted_sha=attempted_sha, run_url=run_url))
             logging.info("Updated sticky comment banner after failed run")
             return
-    pr.create_issue_comment(_output.format_failure_notice(
-        attempted_sha=attempted_sha, run_url=run_url))
+    pr.create_issue_comment(_output.format_failure_notice(attempted_sha=attempted_sha, run_url=run_url))
     logging.info("Posted failure notice (no prior review)")
 
 
-def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations,
-                     run_url=None):
+def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations, run_url=None):
     """Create or update the HarperBot review check run.
 
     Conclusion is success or neutral, never failure: a red X must mean
@@ -1306,6 +1309,7 @@ def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations,
     """
     assert conclusion in ("success", "neutral"), conclusion
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     commit = repo.get_commit(head_sha)
     existing = None
@@ -1314,33 +1318,41 @@ def upsert_check_run(repo, head_sha, *, summary, conclusion, annotations,
         break
     chunks = _output.chunk_annotations(annotations)
     first = chunks[0] if chunks else []
-    output = {"title": "HarperBot review", "summary": summary,
-              "annotations": first}
+    output = {"title": "HarperBot review", "summary": summary, "annotations": first}
     actions = _output.CHECK_RUN_ACTIONS
     if existing is None:
         check = repo.create_check_run(
-            _output.CHECK_RUN_NAME, head_sha, status="completed",
-            started_at=now, completed_at=now, conclusion=conclusion,
-            details_url=run_url, output=output, actions=actions)
+            _output.CHECK_RUN_NAME,
+            head_sha,
+            status="completed",
+            started_at=now,
+            completed_at=now,
+            conclusion=conclusion,
+            details_url=run_url,
+            output=output,
+            actions=actions,
+        )
     else:
-        existing.edit(status="completed", started_at=now, completed_at=now,
-                       conclusion=conclusion, details_url=run_url,
-                       output=output, actions=actions)
+        existing.edit(
+            status="completed",
+            started_at=now,
+            completed_at=now,
+            conclusion=conclusion,
+            details_url=run_url,
+            output=output,
+            actions=actions,
+        )
         check = existing
     for extra in chunks[1:]:
-        check.edit(output={"title": "HarperBot review", "summary": summary,
-                           "annotations": extra})
-    logging.info(f"Check run {conclusion} for {head_sha[:7]} "
-                 f"({len(annotations)} annotations)")
+        check.edit(output={"title": "HarperBot review", "summary": summary, "annotations": extra})
+    logging.info(f"Check run {conclusion} for {head_sha[:7]} " f"({len(annotations)} annotations)")
     return check.html_url
 
 
 def record_check_failure(repo, head_sha, notice, run_url):
     """Neutral check run carrying the failure notice. Never failure."""
     try:
-        upsert_check_run(repo, head_sha, summary=notice,
-                         conclusion="neutral", annotations=[],
-                         run_url=run_url)
+        upsert_check_run(repo, head_sha, summary=notice, conclusion="neutral", annotations=[], run_url=run_url)
     except Exception as e:
         logging.warning(f"Could not record check failure: {e}")
 
@@ -1370,16 +1382,16 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
         _, out_of_diff = _output.split_findings_by_diff(findings, added)
         annotations = [_output.finding_to_annotation(f) for f in out_of_diff]
         check_url = upsert_check_run(
-            repo, commit_sha,
-            summary=_output.build_check_summary(
-                commit_sha=commit_sha, model=model, findings=findings,
-                analysis=main_comment),
+            repo,
+            commit_sha,
+            summary=_output.build_check_summary(commit_sha=commit_sha, model=model, findings=findings, analysis=main_comment),
             conclusion=_output.check_conclusion(findings, failed=False),
-            annotations=annotations, run_url=workflow_run_url())
+            annotations=annotations,
+            run_url=workflow_run_url(),
+        )
 
         # Upsert the main analysis comment: one comment per PR.
-        formatted_comment, _ = build_review_comment(
-            main_comment, pr_details, repo_name, config, check_url=check_url)
+        formatted_comment, _ = build_review_comment(main_comment, pr_details, repo_name, config, check_url=check_url)
         upsert_analysis_comment(pr, formatted_comment)
 
         # Post or save inline suggestions based on config
@@ -1390,12 +1402,9 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
             if post_in_yaml:
                 save_inline_suggestions(pr_details, suggestions)
             else:
-                post_inline_suggestions(pr, pr_details, suggestions,
-                                        github_token, repo)
+                post_inline_suggestions(pr, pr_details, suggestions, github_token, repo)
         elif suggestions:
-            logging.info(
-                f"Skipping {len(suggestions)} inline suggestions: "
-                "post_inline_reviews is off")
+            logging.info(f"Skipping {len(suggestions)} inline suggestions: " "post_inline_reviews is off")
 
         # Apply authoring features if enabled
         if config.get("enable_authoring", False):
@@ -1475,15 +1484,13 @@ def cmd_models(args):
     config = load_config()
     name = args.provider or config.get("provider")
     if not name or name == "auto":
-        print("Specify --provider (auto resolves at review time).",
-              file=sys.stderr)
+        print("Specify --provider (auto resolves at review time).", file=sys.stderr)
         return 1
     if name not in _providers.PROVIDERS:
         print(f"Unknown provider: {name}", file=sys.stderr)
         return 1
     try:
-        models = _providers.list_models(
-            name, os.environ.get(_providers.PROVIDERS[name]["env_key"]))
+        models = _providers.list_models(name, os.environ.get(_providers.PROVIDERS[name]["env_key"]))
     except Exception as e:
         print(f"Could not list {name} models: {e}", file=sys.stderr)
         return 1
@@ -1500,6 +1507,7 @@ def cmd_drift_check(args):
     for the workflow to consume.
     """
     from harperbot.providers import check_model_drift
+
     results = check_model_drift(load_config())
     failed = False
     for r in results:
@@ -1513,18 +1521,13 @@ def main():
     """Main function to run the PR bot."""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="GitHub PR Bot with Gemini AI")
-    parser.add_argument("--repo", required=False, default=None,
-                        help="GitHub repository in format: owner/repo")
-    parser.add_argument("--pr", type=int, required=False, default=None,
-                        help="Pull request number")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print the exact comment without posting")
+    parser.add_argument("--repo", required=False, default=None, help="GitHub repository in format: owner/repo")
+    parser.add_argument("--pr", type=int, required=False, default=None, help="Pull request number")
+    parser.add_argument("--dry-run", action="store_true", help="Print the exact comment without posting")
     sub = parser.add_subparsers(dest="command")
     p_models = sub.add_parser("models", help="List models for a provider")
-    p_models.add_argument("--provider", required=False, default=None,
-                          help="Provider name (default: configured provider)")
-    sub.add_parser("drift-check",
-                   help="Verify configured default models still exist")
+    p_models.add_argument("--provider", required=False, default=None, help="Provider name (default: configured provider)")
+    sub.add_parser("drift-check", help="Verify configured default models still exist")
     args = parser.parse_args()
     if args.command == "models":
         sys.exit(cmd_models(args))
@@ -1539,15 +1542,12 @@ def main():
 
     # Skip when the current commit already has an ok review, unless forced.
     # HARPERBOT_FORCE is set by the workflow for /analyze comment events.
-    forced = os.environ.get("HARPERBOT_FORCE", "").lower() in (
-        "1", "true", "yes")
+    forced = os.environ.get("HARPERBOT_FORCE", "").lower() in ("1", "true", "yes")
     if not args.dry_run and not forced:
         try:
             g = Github(github_token)
             skip_pr = g.get_repo(args.repo).get_pull(pr_details["number"])
-            skip, reason = should_skip_review(
-                skip_pr, pr_details.get("head_sha", ""),
-                bot_login=resolve_bot_login(g))
+            skip, reason = should_skip_review(skip_pr, pr_details.get("head_sha", ""), bot_login=resolve_bot_login(g))
             if skip:
                 logging.info(f"Skipping review: {reason}")
                 return
@@ -1573,11 +1573,8 @@ def main():
             g = Github(github_token)
             repo = g.get_repo(args.repo)
             pr = repo.get_pull(pr_details["number"])
-            record_failure(pr, pr_details.get("head_sha", ""),
-                           workflow_run_url())
-            record_check_failure(
-                repo, pr_details.get("head_sha", ""), notice,
-                workflow_run_url())
+            record_failure(pr, pr_details.get("head_sha", ""), workflow_run_url())
+            record_check_failure(repo, pr_details.get("head_sha", ""), notice, workflow_run_url())
         except Exception as post_e:
             logging.error(f"Failed to post error notice: {post_e}")
         sys.exit(1)
@@ -1588,8 +1585,7 @@ def main():
     logging.info("Posting analysis to PR...")
     if args.dry_run:
         config = load_config()
-        body, _ = build_review_comment(
-            analysis, pr_details, args.repo, config)
+        body, _ = build_review_comment(analysis, pr_details, args.repo, config)
         print(body)
         return
     try:
