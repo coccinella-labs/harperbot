@@ -17,9 +17,8 @@ import re
 import sys
 from types import SimpleNamespace
 
-import requests
-
 import google.genai as genai
+import requests
 import yaml
 from cerebras.cloud.sdk import Cerebras
 from dotenv import load_dotenv

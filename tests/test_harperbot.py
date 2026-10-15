@@ -16,11 +16,11 @@ from harperbot.harperbot import (  # noqa: E402
     BotInternalError,
     analyze_with_gemini,
     apply_suggestions_to_pr,
+    classify_provider_error,
     create_branch,
     find_diff_position,
-    load_config,
     find_existing_analysis_comments,
-    classify_provider_error,
+    load_config,
     parse_diff_for_suggestions,
     upsert_analysis_comment,
     verify_webhook_signature,
@@ -332,8 +332,9 @@ class TestErrorHandling(unittest.TestCase):
 
     def test_httpx_protocol_error_is_transient(self):
         """A mid-response disconnect is transport, not a bot bug."""
-        import httpx
         from unittest.mock import Mock
+
+        import httpx
 
         err = httpx.RemoteProtocolError("gone", request=Mock())
         msg = classify_provider_error(err, "")
@@ -427,7 +428,7 @@ class TestErrorHandling(unittest.TestCase):
             },
         ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
 
                 try:
                     analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
@@ -462,7 +463,7 @@ class TestErrorHandling(unittest.TestCase):
             },
         ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
 
                 try:
                     analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
@@ -497,7 +498,7 @@ class TestErrorHandling(unittest.TestCase):
             },
         ):
             with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
-                from harperbot.harperbot import analyze_with_gemini, BotInternalError
+                from harperbot.harperbot import BotInternalError, analyze_with_gemini
 
                 try:
                     analyze_with_gemini(mock_client, {"diff": "d", "files_changed": ["f"], "title": "t"})
@@ -508,6 +509,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_gemini_shape(self):
         """Gemini usage object logs all counts including thinking tokens."""
         from types import SimpleNamespace
+
         from harperbot.harperbot import log_api_usage
 
         usage = SimpleNamespace(
@@ -525,6 +527,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_openai_shape(self):
         """Cerebras/OpenAI usage object: prompt/completion/total tokens."""
         from types import SimpleNamespace
+
         from harperbot.harperbot import log_api_usage
 
         usage = SimpleNamespace(prompt_tokens=50, completion_tokens=10, total_tokens=60)
@@ -539,6 +542,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_usage_logging_never_fails(self):
         """Absent or hostile shapes degrade to Nones, never raise."""
         from unittest.mock import Mock
+
         from harperbot.harperbot import log_api_usage
 
         log_api_usage(None, "m", "gemini")
@@ -571,7 +575,6 @@ class TestOpenRouterProvider(unittest.TestCase):
                 self.assertIn("OPENROUTER_API_KEY is not set", msg)
 
     def test_success_returns_text_and_logs_resolved_model(self):
-        import requests
 
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}):
             with patch("harperbot.harperbot.load_config", return_value=self._config()):
@@ -760,7 +763,7 @@ class TestOutputPhase1(unittest.TestCase):
         self.assertIn("@app.route", out)
 
     def test_golden_ok(self):
-        from harperbot.output import format_review_comment, Finding
+        from harperbot.output import Finding, format_review_comment
 
         body = format_review_comment(
             analysis="All good.",
@@ -826,7 +829,7 @@ class TestOutputPhase1(unittest.TestCase):
         self.assertIsNone(parse_marker("no marker here"))
 
     def test_counts_line(self):
-        from harperbot.output import counts_line, Finding
+        from harperbot.output import Finding, counts_line
 
         def mk(severity):
             return Finding(severity=severity, category="c", path="p", line=1, message="m")
@@ -839,7 +842,7 @@ class TestCheckRun(unittest.TestCase):
     """Check summary, annotations, chunking, conclusions."""
 
     def test_conclusion_never_failure(self):
-        from harperbot.output import check_conclusion, Finding
+        from harperbot.output import Finding, check_conclusion
 
         def mk(severity):
             return Finding(severity=severity, category="c", path="p", line=1, message="m")
@@ -852,7 +855,7 @@ class TestCheckRun(unittest.TestCase):
         )
 
     def test_in_diff_excluded_from_annotations(self):
-        from harperbot.output import parse_diff_added_lines, split_findings_by_diff, Finding
+        from harperbot.output import Finding, parse_diff_added_lines, split_findings_by_diff
 
         diff = "+++ b/a.py\n@@ -1,3 +1,4 @@\n x\n+y\n z\n" "+++ b/c.py\n@@ -10,2 +10,3 @@\n p\n+q\n r\n"
         added = parse_diff_added_lines(diff)
@@ -864,7 +867,7 @@ class TestCheckRun(unittest.TestCase):
         self.assertEqual(out, [out_f, other_f])
 
     def test_annotation_levels_and_shape(self):
-        from harperbot.output import finding_to_annotation, Finding
+        from harperbot.output import Finding, finding_to_annotation
 
         hi = finding_to_annotation(Finding(severity="critical", category="c", path="p", line=5, message="m"))
         self.assertEqual(hi["annotation_level"], "warning")
@@ -883,7 +886,7 @@ class TestCheckRun(unittest.TestCase):
         self.assertEqual(chunk_annotations([]), [])
 
     def test_check_summary_shape(self):
-        from harperbot.output import build_check_summary, Finding
+        from harperbot.output import Finding, build_check_summary
 
         def mk(severity):
             return Finding(severity=severity, category="c", path="p", line=1, message="m")
@@ -916,7 +919,8 @@ class TestReviewPostingFlag(unittest.TestCase):
         return pr
 
     def test_flag_off_skips_both_paths(self):
-        from unittest.mock import Mock, patch
+        from unittest.mock import patch
+
         from harperbot.harperbot import post_comment_webhook
 
         with patch(
@@ -941,7 +945,8 @@ class TestReviewPostingFlag(unittest.TestCase):
                     ps.assert_not_called()
 
     def test_flag_on_preserves_existing_routing(self):
-        from unittest.mock import Mock, patch
+        from unittest.mock import patch
+
         from harperbot.harperbot import post_comment_webhook
 
         with patch(
@@ -987,6 +992,7 @@ class TestCheckRunActions(unittest.TestCase):
 
     def test_edit_preserves_action(self):
         from unittest.mock import Mock
+
         from harperbot.harperbot import upsert_check_run
 
         repo = Mock()
@@ -1083,6 +1089,7 @@ class TestProviders(unittest.TestCase):
         import io
         from contextlib import redirect_stdout
         from unittest.mock import Mock
+
         from harperbot.harperbot import cmd_models
 
         args = Mock(provider="openrouter", command="models")
@@ -1183,6 +1190,7 @@ class TestDriftCheck(unittest.TestCase):
         import io
         from contextlib import redirect_stdout
         from unittest.mock import Mock
+
         from harperbot.harperbot import cmd_drift_check
 
         with patch(
@@ -1218,16 +1226,18 @@ class TestStickyProtocol(unittest.TestCase):
         return f"<!-- harperbot:summary shown:{shown} " f"attempted:{attempted} status:{status} -->"
 
     def test_author_mismatch_ignored(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
 
         pr = Mock()
         pr.get_issue_comments.return_value = [self._comment("x " + self._marker("abc1234"), login="mallory")]
         self.assertEqual(find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"), [])
 
     def test_author_match_kept(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
 
         pr = Mock()
         mine = self._comment("x " + self._marker("abc1234"))
@@ -1235,8 +1245,9 @@ class TestStickyProtocol(unittest.TestCase):
         self.assertEqual(find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"), [mine])
 
     def test_no_login_legacy_match(self):
-        from harperbot.harperbot import find_existing_analysis_comments
         from unittest.mock import Mock
+
+        from harperbot.harperbot import find_existing_analysis_comments
 
         pr = Mock()
         mine = self._comment("x " + self._marker("abc1234"))
@@ -1244,8 +1255,9 @@ class TestStickyProtocol(unittest.TestCase):
         self.assertEqual(find_existing_analysis_comments(pr), [mine])
 
     def test_skip_matrix(self):
-        from harperbot.harperbot import should_skip_review
         from unittest.mock import Mock
+
+        from harperbot.harperbot import should_skip_review
 
         sha = "abc1234def5678"
         ok = self._comment("x " + self._marker(sha, sha, "ok"))
@@ -1272,6 +1284,7 @@ class TestStickyProtocol(unittest.TestCase):
         """Installation tokens cannot read GET /user, so env wins."""
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
 
         g = Mock()
@@ -1283,6 +1296,7 @@ class TestStickyProtocol(unittest.TestCase):
     def test_login_falls_back_to_get_user(self):
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
 
         g = Mock()
@@ -1294,6 +1308,7 @@ class TestStickyProtocol(unittest.TestCase):
         """Unknown identity must not filter, never filter wrongly."""
         import os
         from unittest.mock import Mock, patch
+
         from harperbot.harperbot import resolve_bot_login
 
         g = Mock()

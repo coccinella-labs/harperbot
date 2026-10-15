@@ -8,10 +8,10 @@ unit-testable without secrets, quota, or API access. The single impure
 boundary is the caller, which fetches data and posts the built strings.
 """
 
-from dataclasses import dataclass
 import json
 import logging
 import re
+from dataclasses import dataclass
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 
