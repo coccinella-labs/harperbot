@@ -20,7 +20,7 @@ For local development, run tests with `pytest` and lint with `pre-commit run --a
 
 ## Architecture
 
-HarperBot is structured as three integration points. The CLI tool at `src/harperbot/harperbot.py` accepts a repository and PR number, fetches the PR diff from GitHub, sends it to the AI provider, and prints results. The API webhook at `api/webhook.py` receives GitHub push payloads, extracts commit changes, routes them to the AI provider, and posts review comments back to the PR using the GitHub API. The configuration system at `harperbot/config.yaml` defines which AI provider to use, which model, and which focus areas (security, performance, code quality) should be analyzed.
+HarperBot is structured as three integration points. The CLI tool at `src/harperbot/harperbot.py` accepts a repository and PR number, fetches the PR diff from GitHub, sends it to the AI provider, and prints results. The API webhook at `api/webhook.py` receives GitHub push payloads, extracts commit changes, routes them to the AI provider, and posts review comments back to the PR using the GitHub API. The configuration system at `src/harperbot/config.yaml` defines which AI provider to use, which model, and which focus areas (security, performance, code quality) should be analyzed.
 
 The flow depends on the integration mode. In CLI mode, HarperBot is a local tool that runs on demand. In webhook mode, HarperBot runs as a service and processes every push automatically. In GitHub Actions mode, HarperBot runs as a step in your CI/CD workflow. All modes converge on the same AI analysis pipeline: fetch the diff, send it to the provider with instructions on what to look for, parse the response, and post results back to GitHub (or print locally for CLI).
 
@@ -32,7 +32,7 @@ HarperBot reads configuration from `src/harperbot/config.yaml`. Set `provider` t
 
 Environment variables override config file settings. Set `GEMINI_API_KEY` to your Google API key, `CEREBRAS_API_KEY` to your Cerebras API key, and `GITHUB_TOKEN` to a personal access token with repo read/write access. For GitHub App integration, also set `HARPER_BOT_APP_ID`, `HARPER_BOT_PRIVATE_KEY`, and `WEBHOOK_SECRET`. The setup script at `bin/setup-harperbot` can automate this configuration; run `bash bin/setup-harperbot` to interactively create the config file and verify your API keys.
 
-Provider-specific options are documented in `config.yaml`. Gemini supports safety override settings for more permissive analysis; Cerebras allows tuning of model parameters for different workload types.
+Provider-specific options are documented in `src/harperbot/config.yaml`. Gemini supports safety override settings for more permissive analysis; Cerebras allows tuning of model parameters for different workload types.
 
 ## API
 
@@ -42,7 +42,7 @@ The CLI at `src/harperbot/harperbot.py` accepts command-line arguments for `--re
 
 ## Contributing
 
-Start by reading GITHUB_APP_SETUP.md for instructions on creating and configuring a GitHub App. Then fork the repository, clone it locally, install dependencies with `pip install -e .`, and install pre-commit hooks with `pre-commit install`.
+Start by reading `docs/GITHUB_APP_SETUP.md` for instructions on creating and configuring a GitHub App. Then fork the repository, clone it locally, install dependencies with `pip install -e .`, and install pre-commit hooks with `pre-commit install`.
 
 Code standards: all new code must pass `pytest` and pre-commit linting. Commit messages should follow Conventional Commits format (e.g., `feat: add cerebras provider support` or `fix: handle webhook timeouts gracefully`). When adding a new AI provider, implement the provider interface in `src/harperbot/providers.py` and add corresponding tests to `tests/test_harperbot.py`. When modifying webhook behavior, test both the webhook handler and the GitHub API interaction.
 
@@ -66,15 +66,15 @@ If HarperBot fails to post review comments, verify that the `GITHUB_TOKEN` has w
 
 ## Performance
 
-Webhook requests complete in 1-3 seconds for typical PRs when using Gemini, and 2-5 seconds with Cerebras. Very large diffs (>10,000 lines) may take longer. The CLI is synchronous; a PR analysis blocks until the AI provider responds. Memory usage is minimal (under 50MB) except during analysis of very large files.
+Analysis duration is dominated by provider response time, not by repository size. Observed on this repository's own workflow runs: 11 seconds for a small documentation diff, 114 seconds for a change touching several source files. Treat those as the scale of the range, not as a benchmark.
 
-## Roadmap
-
-Support for additional AI providers (Claude, GPT-4) is planned. Streaming analysis results instead of posting after completion is under consideration. Improved handling of large diffs through chunking or multi-stage analysis is in progress. See GitHub Issues for the full roadmap and to report bugs or request features.
+The CLI is synchronous; a PR analysis blocks until the AI provider responds. `max_diff_length` in `src/harperbot/config.yaml` (default 4000) truncates the diff sent to the provider, so very large PRs are analyzed on a prefix rather than in full. Output length is bounded separately by the provider's `max_output_tokens`; a review can be cut off mid-sentence when thinking tokens consume the budget.
 
 ## Related Documentation
 
-GITHUB_APP_SETUP.md provides step-by-step instructions for creating and configuring a GitHub App. docs/README.md contains additional technical details on architecture and provider integrations. The project was extracted from Friday Gemini AI and maintains compatibility with that project's configuration format.
+`docs/GITHUB_APP_SETUP.md` provides step-by-step instructions for creating and configuring a GitHub App. `docs/README.md` contains additional technical details on architecture and provider integrations.
+
+Open issues are the source of truth for planned work and bug reports.
 
 ## License
 
