@@ -938,5 +938,114 @@ class TestCheckRunActions(unittest.TestCase):
         for action in CHECK_RUN_ACTIONS:
             self.assertIn("identifier", action)
 
+class TestProviders(unittest.TestCase):
+    """Auto-resolution, listing, validation, plugins. No network."""
+
+    def _cfg(self, **over):
+        cfg = {"provider": "auto",
+               "provider_order": ["gemini", "openrouter", "cerebras"]}
+        cfg.update(over)
+        return cfg
+
+    def test_auto_picks_first_keyed_provider(self):
+        from harperbot import providers
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "k"}, clear=False):
+            for v in ("GEMINI_API_KEY", "CEREBRAS_API_KEY"):
+                os.environ.pop(v, None)
+            name, key, err = providers.resolve_provider(self._cfg())
+            self.assertEqual((name, key, err),
+                             ("openrouter", "OPENROUTER_API_KEY", None))
+
+    def test_auto_prefers_order(self):
+        from harperbot import providers
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g",
+                                     "OPENROUTER_API_KEY": "o"}):
+            name, _, _ = providers.resolve_provider(self._cfg())
+            self.assertEqual(name, "gemini")
+
+    def test_auto_no_keys_specific_error(self):
+        from harperbot import providers
+        with patch.dict(os.environ, {}, clear=False):
+            for v in ("GEMINI_API_KEY", "OPENROUTER_API_KEY", "CEREBRAS_API_KEY"):
+                os.environ.pop(v, None)
+            name, _, err = providers.resolve_provider(self._cfg())
+            self.assertIsNone(name)
+            self.assertIn("No provider API key", err)
+
+    def test_unknown_provider_errors(self):
+        from harperbot import providers
+        name, _, err = providers.resolve_provider({"provider": "wat"})
+        self.assertIsNone(name)
+        self.assertIn("Unknown provider", err)
+
+    def test_fixture_parses_and_filters_tools(self):
+        import json
+        fixture = json.load(open("tests/fixtures/openrouter_models.json"))
+        ids = [m["id"] for m in fixture["data"]]
+        self.assertIn("openrouter/auto", ids)
+        tools_ok = [m["id"] for m in fixture["data"]
+                    if "tools" in (m.get("supported_parameters") or [])]
+        self.assertTrue(tools_ok)
+        self.assertEqual(len(tools_ok), len(ids) - 1)
+
+    def test_plugins_only_for_auto(self):
+        from harperbot import providers
+        cfg = {"openrouter": {"allowed_models": ["a/*"], "cost_tier": "high"}}
+        plugins = providers.openrouter_plugins(cfg, "openrouter/auto")
+        self.assertEqual(plugins[0]["id"], "auto-router")
+        self.assertEqual(plugins[0]["allowed_models"], ["a/*"])
+        self.assertEqual(plugins[0]["cost_tier"], "high")
+        self.assertIsNone(providers.openrouter_plugins(cfg, "openai/gpt-5.2"))
+
+    def test_model_validation_warns_not_fails(self):
+        from harperbot import providers
+        with patch("harperbot.providers.list_models",
+                   side_effect=RuntimeError("down")):
+            self.assertTrue(providers.validate_model("openrouter", "x", None))
+
+    def test_models_command_lists_and_exits_zero(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import Mock
+        from harperbot.harperbot import cmd_models
+        args = Mock(provider="openrouter", command="models")
+        with patch("harperbot.providers.list_models",
+                   return_value=["openrouter/auto", "x/y"]) as ml:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = cmd_models(args)
+        self.assertEqual(code, 0)
+        self.assertIn("openrouter/auto", buf.getvalue())
+        ml.assert_called_once()
+
+    def test_auto_end_to_end_selects_gemini(self):
+        from unittest.mock import Mock, patch
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k"}, clear=False):
+            for v in ("OPENROUTER_API_KEY", "CEREBRAS_API_KEY"):
+                os.environ.pop(v, None)
+            with patch("harperbot.harperbot.load_config", return_value={
+                    "provider": "auto",
+                    "provider_order": ["gemini", "openrouter", "cerebras"],
+                    "focus": "all", "max_diff_length": 4000,
+                    "max_output_tokens": 100,
+                    "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}"}):
+                client = Mock()
+                resp = Mock()
+                resp.text = "fine"
+                resp.candidates = None
+                client.models.generate_content.return_value = resp
+                from harperbot.harperbot import analyze_with_gemini
+                out = analyze_with_gemini(
+                    client, {"diff": "d", "files_changed": ["f"], "title": "t"})
+                self.assertEqual(out, "fine")
+
+    def test_footer_shows_provider(self):
+        from harperbot.harperbot import build_review_comment
+        body, ok = build_review_comment(
+            "text", {"head_sha": "abc1234", "model_name": "m",
+                     "provider_name": "openrouter"},
+            "o/r", {"model": "m"})
+        self.assertIn("m via openrouter", body)
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,11 @@ try:
 except ImportError:  # executed directly as a script
     import output as _output
 
+try:
+    from . import providers as _providers
+except ImportError:  # executed directly as a script
+    import providers as _providers
+
 # Flask imported conditionally for webhook mode
 flask_available = False
 try:
@@ -418,22 +423,26 @@ def classify_provider_error(error, context):
     raise BotInternalError("analysis") from error
 
 
-def generate_openrouter(api_key, model_name, formatted_prompt, max_output_tokens):
+def generate_openrouter(api_key, model_name, formatted_prompt, max_output_tokens,
+                        plugins=None):
     """Call OpenRouter chat completions. Returns (content, resolved_model).
 
     Raises requests.HTTPError with the response attached on HTTP failures,
     so callers can map status codes structurally.
     """
+    body = {"model": model_name,
+            "messages": [{"role": "user",
+                          "content": formatted_prompt}],
+            "max_tokens": max_output_tokens}
+    if plugins:
+        body["plugins"] = plugins
     resp = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}",
                  "Content-Type": "application/json",
                  "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
                  "X-Title": "HarperBot"},
-        json={"model": model_name,
-              "messages": [{"role": "user",
-                            "content": formatted_prompt}],
-              "max_tokens": max_output_tokens},
+        json=body,
         timeout=120,
     )
     resp.raise_for_status()
@@ -468,31 +477,27 @@ def analyze_with_gemini(client, pr_details):
         temperature = config.get("temperature", 0.2)
         max_output_tokens = config.get("max_output_tokens", 4096)
         safety_settings = config.get("safety_settings", [])
-        provider = config.get("provider", "gemini")
-        required_key = {"gemini": "GEMINI_API_KEY",
-                        "cerebras": "CEREBRAS_API_KEY",
-                        "openrouter": "OPENROUTER_API_KEY"}[provider]
-        if not os.environ.get(required_key):
-            return (f"{required_key} is not set for provider {provider}. "
+        provider, env_key, resolve_error = _providers.resolve_provider(config)
+        if resolve_error:
+            if provider is None and config.get("provider", "gemini") != "auto":
+                raise ValueError(f"Unsupported provider: {config.get('provider')}")
+            return resolve_error + "; no review was performed."
+        if not os.environ.get(env_key):
+            return (f"{env_key} is not set for provider {provider}. "
                     f"Add it as a repository secret; no review was performed.")
 
         # Auto-select model based on PR complexity
         diff_length = len(pr_details["diff"])
         num_files = len(pr_details["files_changed"])
-        if provider == "gemini":
-            if diff_length > 10000 or num_files > 10:
-                model_name = "gemini-3.8-flash"  # Single model for all PR sizes for now
-            else:
-                model_name = config.get("model", "gemini-3.8-flash")
-        elif provider == "cerebras":
-            model_name = config.get("cerebras_model", "gpt-oss-120b")
-        elif provider == "openrouter":
-            # Pinned default; openrouter/auto without an allow-list would
-            # route unrestricted, which is a separate, unbuilt feature.
-            model_name = config.get("openrouter_model", "openrouter/auto")
+        if provider == "gemini" and (diff_length > 10000 or num_files > 10):
+            # Large diffs always use the flagship model regardless of config.
+            model_name = _providers.PROVIDERS["gemini"]["default_model"]
         else:
-            raise ValueError(f"Unsupported provider: {provider}")
+            model_name = _providers.resolve_model(provider, config)
+        _providers.validate_model(provider, model_name,
+                                  os.environ.get(env_key))
         pr_details["model_name"] = model_name
+        pr_details["provider_name"] = provider
 
         # Use client for selected model
 
@@ -574,7 +579,8 @@ def analyze_with_gemini(client, pr_details):
                     try:
                         or_content, or_resolved = generate_openrouter(
                             or_key, or_model, formatted_prompt,
-                            max_output_tokens)
+                            max_output_tokens,
+                            _providers.openrouter_plugins(config, or_model))
                         pr_details["model_name"] = or_resolved
                     except Exception as or_error:
                         logging.error(f"OpenRouter fallback also failed: {or_error}")
@@ -604,7 +610,8 @@ def analyze_with_gemini(client, pr_details):
             api_key = os.environ.get("OPENROUTER_API_KEY")
             try:
                 content, resolved = generate_openrouter(
-                    api_key, model_name, formatted_prompt, max_output_tokens)
+                    api_key, model_name, formatted_prompt, max_output_tokens,
+                    _providers.openrouter_plugins(config, model_name))
                 pr_details["model_name"] = resolved
             except requests.HTTPError as e:
                 code = (e.response.status_code
@@ -1198,6 +1205,8 @@ def build_review_comment(analysis, pr_details, repo_name, config,
     commit_sha = pr_details.get("head_sha", "")
     commit_url = f"https://github.com/{repo_name}/commit/{commit_sha}"
     model = pr_details.get("model_name") or config.get("model", "?")
+    provider = pr_details.get("provider_name")
+    model = f"{model} via {provider}" if provider else model
     focus = config.get("focus", "all")
     run_url = workflow_run_url()
     summary, findings, ok = _output.parse_findings(analysis)
@@ -1401,15 +1410,47 @@ def webhook_handler():
         return jsonify({"error": "Processing failed"}), 500
 
 
+def cmd_models(args):
+    """List models for a provider. Discovery only, never fails a review."""
+    config = load_config()
+    name = args.provider or config.get("provider")
+    if not name or name == "auto":
+        print("Specify --provider (auto resolves at review time).",
+              file=sys.stderr)
+        return 1
+    if name not in _providers.PROVIDERS:
+        print(f"Unknown provider: {name}", file=sys.stderr)
+        return 1
+    try:
+        models = _providers.list_models(
+            name, os.environ.get(_providers.PROVIDERS[name]["env_key"]))
+    except Exception as e:
+        print(f"Could not list {name} models: {e}", file=sys.stderr)
+        return 1
+    for model in models:
+        print(model)
+    return 0
+
+
 def main():
     """Main function to run the PR bot."""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="GitHub PR Bot with Gemini AI")
-    parser.add_argument("--repo", required=True, help="GitHub repository in format: owner/repo")
-    parser.add_argument("--pr", type=int, required=True, help="Pull request number")
+    parser.add_argument("--repo", required=False, default=None,
+                        help="GitHub repository in format: owner/repo")
+    parser.add_argument("--pr", type=int, required=False, default=None,
+                        help="Pull request number")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the exact comment without posting")
+    sub = parser.add_subparsers(dest="command")
+    p_models = sub.add_parser("models", help="List models for a provider")
+    p_models.add_argument("--provider", required=False, default=None,
+                          help="Provider name (default: configured provider)")
     args = parser.parse_args()
+    if args.command == "models":
+        sys.exit(cmd_models(args))
+    if not args.repo or not args.pr:
+        parser.error("--repo and --pr are required (or use the models command)")
 
     # Setup environment and get PR details
     github_token, client = setup_environment()

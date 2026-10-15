@@ -12,8 +12,12 @@
 # 'performance' for optimization suggestions, 'quality' for code quality feedback
 focus: all
 
-# AI provider to use: 'gemini' or 'cerebras'
-provider: gemini
+# AI provider to use: 'auto', 'gemini', 'cerebras' or 'openrouter'.
+# 'auto' picks the first provider in provider_order whose API key is set.
+provider: auto
+
+# Provider preference order for 'auto'. First key found wins.
+provider_order: [gemini, openrouter, cerebras]
 
 # Gemini model to use (if provider: gemini)
 # Available options: 'gemini-3.8-flash' (stable, recommended for reviews),
@@ -47,6 +51,12 @@ custom_functions: false
 # is logged per run. Pin a specific model (e.g. openai/gpt-5.2) once the
 # key is funded. Verified HTTP 200 on a free-tier key.
 openrouter_model: openrouter/auto
+
+# OpenRouter auto-router restrictions (only used with openrouter/auto).
+# Exclusions apply after the allow-list. Cost tiers: low, medium, high, max.
+openrouter:
+  allowed_models: ["anthropic/*", "google/*"]
+  cost_tier: medium
 
 # Maximum output tokens
 # Maximum length of AI response in tokens. Higher allows more detailed analysis but increases cost.
