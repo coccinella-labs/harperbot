@@ -278,7 +278,7 @@ def describe_empty_response(response):
         for part in getattr(getattr(cand, "content", None), "parts", None) or []:
             if getattr(part, "text", None):
                 kind = "text"
-            elif hasattr(part, "function_call"):
+            elif getattr(part, "function_call", None) is not None:
                 kind = "function_call"
             else:
                 kind = "other"
@@ -444,8 +444,10 @@ def analyze_with_gemini(client, pr_details):
         # Check for function calls
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
-                if hasattr(part, "function_call"):
-                    logging.info(f"Function call detected: {part.function_call.name}")
+                call = getattr(part, "function_call", None)
+                if call is not None:
+                    logging.info(
+                        f"Function call detected: {getattr(call, 'name', '?')}")
                     # For now, just log; full handling would execute and send back
 
         # Handle different response formats

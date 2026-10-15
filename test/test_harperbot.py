@@ -378,6 +378,35 @@ class TestErrorHandling(unittest.TestCase):
                     self.assertIn("function_call", e.public_message)
                     self.assertIn("STOP", e.public_message)
 
+    def test_null_function_call_is_other_not_a_call(self):
+        """A part with function_call=None must not crash the logger."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from unittest.mock import patch as _patch
+        part = SimpleNamespace(text=None, function_call=None)
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]),
+                               finish_reason="STOP")
+        mock_client = Mock()
+        mock_resp = Mock()
+        mock_resp.text = None
+        mock_resp.candidates = [cand]
+        mock_client.models.generate_content.return_value = mock_resp
+        with _patch("harperbot.load_config", return_value={
+                "provider": "gemini", "model": "m", "focus": "all",
+                "max_diff_length": 4000, "max_output_tokens": 100,
+                "prompt": "{num_files} {files_list} {diff_content} {focus_instruction}",
+                "custom_functions": False}):
+            with _patch.dict("os.environ", {"GEMINI_API_KEY": "k"}):
+                from harperbot import analyze_with_gemini, BotInternalError
+                try:
+                    analyze_with_gemini(
+                        mock_client, {"diff": "d", "files_changed": ["f"],
+                                      "title": "t"})
+                    self.fail("expected BotInternalError")
+                except BotInternalError as e:
+                    self.assertIn("other", e.public_message)
+                    self.assertNotIn("function_call", e.public_message)
+
     def test_blocked_response_names_block_reason(self):
         """A blocked reply names the block reason, not a generic message."""
         from types import SimpleNamespace
