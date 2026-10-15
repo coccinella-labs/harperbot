@@ -1049,11 +1049,9 @@ class TestProviders(unittest.TestCase):
 
 class TestDriftCheck(unittest.TestCase):
     """Drift detection: present, absent, unreachable, CLI codes."""
-
     def _cfg(self):
         return {"provider": "gemini", "provider_order": ["gemini"],
                 "model": "gemini-3.8-flash"}
-
     def test_present_model_ok(self):
         from harperbot import providers
         with patch("harperbot.providers.list_models",
@@ -1062,7 +1060,6 @@ class TestDriftCheck(unittest.TestCase):
                 self._cfg(), ["gemini"], environ={})
             self.assertTrue(r["ok"])
             self.assertEqual(r["model"], "gemini-3.8-flash")
-
     def test_absent_model_drift(self):
         from harperbot import providers
         with patch("harperbot.providers.list_models",
@@ -1071,7 +1068,6 @@ class TestDriftCheck(unittest.TestCase):
                 self._cfg(), ["gemini"], environ={})
             self.assertFalse(r["ok"])
             self.assertIn("absent", r["detail"])
-
     def test_unreachable_listing_retries_then_reports(self):
         from harperbot import providers
         calls = []
@@ -1087,7 +1083,6 @@ class TestDriftCheck(unittest.TestCase):
                 self.assertTrue(r["ok"])
                 self.assertEqual(len(calls), 3)
                 self.assertEqual(sl.call_count, 2)
-
     def test_persistent_failure_reports_unreachable(self):
         from harperbot import providers
         with patch("harperbot.providers.list_models",
@@ -1097,7 +1092,6 @@ class TestDriftCheck(unittest.TestCase):
                     self._cfg(), ["gemini"], environ={})
                 self.assertFalse(r["ok"])
                 self.assertIn("unreachable", r["detail"])
-
     def test_cli_exit_codes(self):
         import io
         from contextlib import redirect_stdout
@@ -1117,6 +1111,95 @@ class TestDriftCheck(unittest.TestCase):
             with redirect_stdout(buf):
                 self.assertEqual(cmd_drift_check(Mock()), 1)
             self.assertIn("DRIFT g m", buf.getvalue())
+
+class TestStickyProtocol(unittest.TestCase):
+    """Author check plus skip/retry/force matrix."""
+    def _comment(self, body, login="harperbot-knows[bot]"):
+        from unittest.mock import Mock
+        c = Mock()
+        c.body = body
+        c.user.login = login
+        return c
+    def _marker(self, shown, attempted="abc1234", status="ok"):
+        return (f"<!-- harperbot:summary shown:{shown} "
+                f"attempted:{attempted} status:{status} -->")
+    def test_author_mismatch_ignored(self):
+        from harperbot.harperbot import find_existing_analysis_comments
+        from unittest.mock import Mock
+        pr = Mock()
+        pr.get_issue_comments.return_value = [
+            self._comment("x " + self._marker("abc1234"), login="mallory")]
+        self.assertEqual(
+            find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"),
+            [])
+    def test_author_match_kept(self):
+        from harperbot.harperbot import find_existing_analysis_comments
+        from unittest.mock import Mock
+        pr = Mock()
+        mine = self._comment("x " + self._marker("abc1234"))
+        pr.get_issue_comments.return_value = [mine]
+        self.assertEqual(
+            find_existing_analysis_comments(pr, bot_login="harperbot-knows[bot]"),
+            [mine])
+    def test_no_login_legacy_match(self):
+        from harperbot.harperbot import find_existing_analysis_comments
+        from unittest.mock import Mock
+        pr = Mock()
+        mine = self._comment("x " + self._marker("abc1234"))
+        pr.get_issue_comments.return_value = [mine]
+        self.assertEqual(find_existing_analysis_comments(pr), [mine])
+    def test_skip_matrix(self):
+        from harperbot.harperbot import should_skip_review
+        from unittest.mock import Mock
+        sha = "abc1234def5678"
+        ok = self._comment("x " + self._marker(sha, sha, "ok"))
+        failed = self._comment("x " + self._marker("oldsha1", sha, "failed"))
+        stale = self._comment("x " + self._marker("oldsha1", "oldsha1", "ok"))
+        def pr_with(*comments):
+            pr = Mock()
+            pr.get_issue_comments.return_value = list(comments)
+            return pr
+        skip, _ = should_skip_review(pr_with(ok), sha, bot_login="harperbot-knows[bot]")
+        self.assertTrue(skip)
+        skip, _ = should_skip_review(pr_with(failed), sha, bot_login="harperbot-knows[bot]")
+        self.assertFalse(skip)
+        skip, _ = should_skip_review(pr_with(stale), sha, bot_login="harperbot-knows[bot]")
+        self.assertFalse(skip)
+        skip, _ = should_skip_review(pr_with(), sha, bot_login="harperbot-knows[bot]")
+        self.assertFalse(skip)
+        skip, _ = should_skip_review(pr_with(ok), sha, bot_login="harperbot-knows[bot]",
+                                      force=True)
+        self.assertFalse(skip)
+
+    def test_login_from_env_uses_no_api_call(self):
+        """Installation tokens cannot read GET /user, so env wins."""
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        env = {"HARPERBOT_LOGIN": "harperbot-knows[bot]"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(resolve_bot_login(g), "harperbot-knows[bot]")
+        g.get_user.assert_not_called()
+
+    def test_login_falls_back_to_get_user(self):
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        g.get_user.return_value.login = "someone-else"
+        with patch.dict(os.environ, {"HARPERBOT_LOGIN": "  "}):
+            self.assertEqual(resolve_bot_login(g), "someone-else")
+
+    def test_login_unknown_returns_none(self):
+        """Unknown identity must not filter, never filter wrongly."""
+        import os
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import resolve_bot_login
+        g = Mock()
+        g.get_user.side_effect = Exception("Resource not accessible")
+        with patch.dict(os.environ, {"HARPERBOT_LOGIN": ""}):
+            self.assertIsNone(resolve_bot_login(g))
 
 if __name__ == "__main__":
     unittest.main()

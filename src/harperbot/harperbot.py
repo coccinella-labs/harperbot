@@ -1158,20 +1158,80 @@ ANALYSIS_MARKER = "<!-- harperbot-analysis -->"
 LEGACY_ANALYSIS_SIGNATURE = "<summary>HarperBot Analysis</summary>"
 
 
-def find_existing_analysis_comments(pr):
-    """Return earlier bot analysis comments on this PR, oldest first."""
+def find_existing_analysis_comments(pr, bot_login=None):
+    """Return earlier bot analysis comments on this PR, oldest first.
+
+    Matches by marker AND author identity when the login is known: a
+    pasted marker in anyone else's comment must not make the bot skip
+    a review or edit the wrong thing. Without a login, marker match
+    alone applies (legacy behavior, kept for tests and webhook mode).
+    """
     matches = []
     for comment in pr.get_issue_comments():
         body = comment.body or ""
-        if _output.parse_marker(body) is not None or (
+        marked = (_output.parse_marker(body) is not None or (
             ANALYSIS_MARKER in body
             or (
                 LEGACY_ANALYSIS_SIGNATURE in body
                 and "harperbot/actions/workflows" in body
             )
-        ):
-            matches.append(comment)
+        ))
+        if not marked:
+            continue
+        if bot_login is not None:
+            try:
+                author = (comment.user or {}).get("login", "") \
+                    if isinstance(comment.user, dict) \
+                    else getattr(comment.user, "login", "")
+            except Exception:
+                author = ""
+            if author != bot_login:
+                continue
+        matches.append(comment)
     return matches
+
+
+def resolve_bot_login(g):
+    """Best-effort identity of the account that posts reviews.
+
+    App installation tokens cannot read GET /user, so the workflow
+    passes HARPERBOT_LOGIN as the app slug plus the [bot] suffix. A
+    personal token resolves through get_user. When identity cannot be
+    established, None is returned and marker matching ignores author,
+    which is the older, weaker behavior, never a wrong filter.
+    """
+    from_env = (os.environ.get("HARPERBOT_LOGIN") or "").strip()
+    if from_env:
+        return from_env
+    try:
+        return g.get_user().login
+    except Exception as e:
+        logging.warning(
+            f"Bot login unresolved ({type(e).__name__}); author checks "
+            "will be skipped.")
+        return None
+
+
+def should_skip_review(pr, head_sha, bot_login=None, force=False):
+    """True when a current ok review already covers this SHA.
+
+    Skip only when the newest sticky marker says status ok and shown
+    equals the head SHA. Any failure retries; force (manual /analyze)
+    always runs. Returns (skip, reason).
+    """
+    if force:
+        return False, "forced run"
+    markers = []
+    for comment in find_existing_analysis_comments(pr, bot_login):
+        parsed = _output.parse_marker(comment.body or "")
+        if parsed is not None:
+            markers.append(parsed)
+    if not markers:
+        return False, "no prior marker"
+    latest = markers[-1]
+    if latest.get("status") == "ok" and latest.get("shown") == head_sha:
+        return True, f"already reviewed {head_sha[:7]}"
+    return False, "stale or failed marker"
 
 
 def upsert_analysis_comment(pr, formatted_comment):
@@ -1476,6 +1536,23 @@ def main():
     # Setup environment and get PR details
     github_token, client = setup_environment()
     pr_details = get_pr_details(github_token, args.repo, args.pr)
+
+    # Skip when the current commit already has an ok review, unless forced.
+    # HARPERBOT_FORCE is set by the workflow for /analyze comment events.
+    forced = os.environ.get("HARPERBOT_FORCE", "").lower() in (
+        "1", "true", "yes")
+    if not args.dry_run and not forced:
+        try:
+            g = Github(github_token)
+            skip_pr = g.get_repo(args.repo).get_pull(pr_details["number"])
+            skip, reason = should_skip_review(
+                skip_pr, pr_details.get("head_sha", ""),
+                bot_login=resolve_bot_login(g))
+            if skip:
+                logging.info(f"Skipping review: {reason}")
+                return
+        except Exception as e:
+            logging.warning(f"Skip check failed, proceeding anyway: {e}")
 
     # Analyze PR with Gemini
     logging.info("Analyzing PR with Gemini...")
