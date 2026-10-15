@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 coccinella-labs
+
+---
+# Consumed by the pre-commit yamllint hook, which runs with --strict.
+# Without this file the hook has failed since it was added: the workflow
+# and config files were never written to satisfy its defaults.
+
+extends: default
+
+rules:
+  # Held to the same 127-column budget black and the workflow use.
+  # Reflowing YAML for 80 columns buys nothing readable.
+  line-length:
+    max: 127
+
+  # Every GitHub workflow starts with `on:` followed by a mapping.
+  # Flagging that key as a truthy value is a YAML 1.1 artifact.
+  truthy:
+    check-keys: false
+
+  # GitHub workflows do not use YAML document separators.
+  document-start: disable
