@@ -15,6 +15,9 @@ import logging
 import os
 import re
 import sys
+from types import SimpleNamespace
+
+import requests
 
 import google.genai as genai
 import yaml
@@ -125,8 +128,6 @@ def get_pr_details(github_token, repo_name, pr_number):
     diff_url = pr.diff_url
 
     # Get diff content
-    import requests
-
     diff_content = requests.get(diff_url).text
 
     return {
@@ -385,7 +386,8 @@ def analyze_with_gemini(client, pr_details):
         safety_settings = config.get("safety_settings", [])
         provider = config.get("provider", "gemini")
         required_key = {"gemini": "GEMINI_API_KEY",
-                        "cerebras": "CEREBRAS_API_KEY"}[provider]
+                        "cerebras": "CEREBRAS_API_KEY",
+                        "openrouter": "OPENROUTER_API_KEY"}[provider]
         if not os.environ.get(required_key):
             return (f"{required_key} is not set for provider {provider}. "
                     f"Add it as a repository secret; no review was performed.")
@@ -400,6 +402,10 @@ def analyze_with_gemini(client, pr_details):
                 model_name = config.get("model", "gemini-3.8-flash")
         elif provider == "cerebras":
             model_name = config.get("cerebras_model", "gpt-oss-120b")
+        elif provider == "openrouter":
+            # Pinned default; openrouter/auto without an allow-list would
+            # route unrestricted, which is a separate, unbuilt feature.
+            model_name = config.get("openrouter_model", "openai/gpt-5.2")
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 
@@ -485,6 +491,39 @@ def analyze_with_gemini(client, pr_details):
             # Wrap response to mimic Gemini structure
             response.text = response.choices[0].message.content
             response.candidates = None  # No function calls for now
+        elif provider == "openrouter":
+            api_key = os.environ.get("OPENROUTER_API_KEY")
+            try:
+                resp = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}",
+                             "Content-Type": "application/json",
+                             "HTTP-Referer": "https://github.com/coccinella-labs/harperbot",
+                             "X-Title": "HarperBot"},
+                    json={"model": model_name,
+                          "messages": [{"role": "user",
+                                        "content": formatted_prompt}],
+                          "max_tokens": max_output_tokens},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+            except requests.HTTPError as e:
+                code = (e.response.status_code
+                        if e.response is not None else None)
+                if code in (401, 403):
+                    return ("Error generating analysis: Invalid API key or "
+                            f"authentication failed (provider openrouter, model "
+                            f"{model_name}). Please check OPENROUTER_API_KEY.")
+                if code == 429:
+                    return ("Error generating analysis: API quota exceeded "
+                            f"(provider openrouter, model {model_name}). "
+                            f"Please try again later.")
+                raise
+            data = resp.json()
+            resolved = data.get("model", model_name)
+            logging.info(f"OpenRouter resolved model: {resolved}")
+            content = data["choices"][0]["message"]["content"]
+            response = SimpleNamespace(text=content, candidates=None)
 
         # Check for function calls
         if response.candidates and response.candidates[0].content.parts:
