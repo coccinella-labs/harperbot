@@ -12,7 +12,7 @@ Status: Production-ready. Extracted from the Friday Gemini AI project. Actively 
 
 HarperBot requires Python 3.9+, a GitHub account with repository access, and an API key from your chosen AI provider (Google Gemini or Cerebras).
 
-To use HarperBot as a CLI tool, clone the repository with `git clone https://github.com/coccinella-labs/harperbot.git`, install the package with `pip install -e .`, then set environment variables for your API keys (`GEMINI_API_KEY` for Gemini or `CEREBRAS_API_KEY` for Cerebras) and `GITHUB_TOKEN` for GitHub access. To analyze a pull request, run `python harperbot/harperbot.py --repo owner/repo --pr 123`. HarperBot will fetch the PR diff, send it to your configured AI model, and print the analysis to stdout.
+To use HarperBot as a CLI tool, clone the repository with `git clone https://github.com/coccinella-labs/harperbot.git`, install the package with `pip install -e .`, then set environment variables for your API keys (`GEMINI_API_KEY` for Gemini or `CEREBRAS_API_KEY` for Cerebras) and `GITHUB_TOKEN` for GitHub access. To analyze a pull request, run `python src/harperbot/harperbot.py --repo owner/repo --pr 123`. HarperBot will fetch the PR diff, send it to your configured AI model, and print the analysis to stdout.
 
 To integrate HarperBot as a GitHub App that automatically reviews all PRs in your repositories, first create a GitHub App through your account settings and register the webhook endpoint (`api/webhook.py`) with GitHub. Then run the webhook server using Gunicorn or another WSGI server, configure the API key and GitHub App credentials, and push to your repository. GitHub will send webhook payloads on every push, HarperBot will analyze the changes, and post review comments directly to the PR. For CI/CD integration, copy the workflow file from `.github/workflows/harperbot.yml` and adjust paths and provider settings as needed.
 
@@ -20,7 +20,7 @@ For local development, run tests with `python -m pytest test/test_harperbot.py` 
 
 ## Architecture
 
-HarperBot is structured as three integration points. The CLI tool at `harperbot/harperbot.py` accepts a repository and PR number, fetches the PR diff from GitHub, sends it to the AI provider, and prints results. The API webhook at `api/webhook.py` receives GitHub push payloads, extracts commit changes, routes them to the AI provider, and posts review comments back to the PR using the GitHub API. The configuration system at `harperbot/config.yaml` defines which AI provider to use, which model, and which focus areas (security, performance, code quality) should be analyzed.
+HarperBot is structured as three integration points. The CLI tool at `src/harperbot/harperbot.py` accepts a repository and PR number, fetches the PR diff from GitHub, sends it to the AI provider, and prints results. The API webhook at `api/webhook.py` receives GitHub push payloads, extracts commit changes, routes them to the AI provider, and posts review comments back to the PR using the GitHub API. The configuration system at `harperbot/config.yaml` defines which AI provider to use, which model, and which focus areas (security, performance, code quality) should be analyzed.
 
 The flow depends on the integration mode. In CLI mode, HarperBot is a local tool that runs on demand. In webhook mode, HarperBot runs as a service and processes every push automatically. In GitHub Actions mode, HarperBot runs as a step in your CI/CD workflow. All modes converge on the same AI analysis pipeline: fetch the diff, send it to the provider with instructions on what to look for, parse the response, and post results back to GitHub (or print locally for CLI).
 
@@ -38,7 +38,7 @@ Provider-specific options are documented in `config.yaml`. Gemini supports safet
 
 The webhook endpoint at `api/webhook.py` listens for GitHub push events. When GitHub sends a push webhook, HarperBot extracts the commit diff, sends it to the AI provider with your configured focus settings, and posts review comments to the PR using the GitHub API. The webhook path should be registered in your GitHub App settings and secured with the webhook secret you configure.
 
-The CLI at `harperbot/harperbot.py` accepts command-line arguments for `--repo` (owner/repo format) and `--pr` (PR number) only. Provider and focus come from `harperbot/config.yaml`, not from flags. The command is synchronous; HarperBot fetches the PR, analyzes it, and returns results before exiting.
+The CLI at `src/harperbot/harperbot.py` accepts command-line arguments for `--repo` (owner/repo format) and `--pr` (PR number) only. Provider and focus come from `harperbot/config.yaml`, not from flags. The command is synchronous; HarperBot fetches the PR, analyzes it, and returns results before exiting.
 
 ## Contributing
 

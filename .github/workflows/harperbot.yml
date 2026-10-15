@@ -152,7 +152,7 @@ jobs:
           echo "pip: $(pip --version)"
 
           # Run the PR bot script with repository and PR number
-          python ./harperbot/harperbot.py \
+          python ./src/harperbot/harperbot.py \
             --repo ${{ github.repository }} \
             --pr ${{ github.event.pull_request.number || github.event.issue.number }}
 

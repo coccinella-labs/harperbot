@@ -96,10 +96,13 @@ fi
 rm .test_write_permission
 
 # Check for existing files
-if [ -d "harperbot" ] && ! $UPDATE_MODE; then
-    echo "Error: 'harperbot' directory already exists."
+if [ -d "src/harperbot" ] && ! $UPDATE_MODE; then
+    echo "Error: 'src/harperbot' directory already exists."
     echo "Run with --update to overwrite existing installation, or remove it manually."
     exit 1
+fi
+if [ -d "harperbot" ] && [ ! -d "src/harperbot" ]; then
+    echo "Warning: legacy ./harperbot found. This version installs to ./src/harperbot; remove ./harperbot once verified."
 fi
 
 if [ -f ".github/workflows/harperbot.yml" ] && ! $UPDATE_MODE; then
@@ -131,13 +134,17 @@ fi
 echo "Integrity check passed."
 
 echo "Copying harperbot directory..."
+if ! mkdir -p ./src; then
+    echo "Error: Failed to create ./src directory"
+    exit 1
+fi
 if $USE_RSYNC; then
-    if ! rsync -a $TEMP_DIR/repo/harperbot/ ./harperbot/; then
+    if ! rsync -a $TEMP_DIR/repo/src/harperbot/ ./src/harperbot/; then
         echo "Error: Failed to copy harperbot directory with rsync"
         exit 1
     fi
 else
-    if ! cp -r $TEMP_DIR/repo/harperbot .; then
+    if ! cp -r $TEMP_DIR/repo/src/harperbot ./src/; then
         echo "Error: Failed to copy harperbot directory"
         exit 1
     fi
@@ -161,7 +168,7 @@ else
     fi
 fi
 else
-    echo "Dry-run: Would copy harperbot directory"
+    echo "Dry-run: Would copy src/harperbot directory"
     echo "Dry-run: Would copy .github/workflows/harperbot.yml"
     echo "Dry-run: Would verify file integrity"
 fi
@@ -172,10 +179,10 @@ if ! $DRY_RUN; then
     echo "Next steps:"
     echo "1. Install Python dependencies: pip install PyGithub python-dotenv PyYAML google-genai cerebras-cloud-sdk"
     echo "2. Set repository secrets: GEMINI_API_KEY, HARPER_BOT_APP_ID, HARPER_BOT_PRIVATE_KEY"
-    echo "3. Optional: Configure harperbot/config.yaml"
+    echo "3. Optional: Configure src/harperbot/config.yaml"
     echo "4. Push changes and test with a PR"
     echo ""
-    echo "For detailed instructions, see harperbot/HarperBot.md"
+    echo "For detailed instructions, see src/harperbot/HarperBot.md"
     echo ""
     echo "NOTE: Workflow Mode is legacy. Consider Webhook Mode for better scalability."
 else

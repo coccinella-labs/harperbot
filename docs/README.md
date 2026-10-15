@@ -50,7 +50,7 @@ This is the preferred mode for new installations. It uses a centralized deployme
 3. When a PR is opened/updated, the workflow runs and posts analysis
 
 ### CLI Mode
-Run manually: `python harperbot/harperbot.py --repo owner/repo --pr 123`
+Run manually: `python src/harperbot/harperbot.py --repo owner/repo --pr 123`
 
 *Note: The local webhook server uses Flask's development server, suitable for testing. For production self-hosting outside Vercel, use a WSGI server like Gunicorn.*
 
