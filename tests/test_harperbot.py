@@ -839,5 +839,60 @@ class TestCheckRun(unittest.TestCase):
         diff = "+++ b/a.py\n@@ -1,3 +10,4 @@\n x\n+y\n+z\n w\n"
         self.assertEqual(parse_diff_added_lines(diff), {"a.py": [(11, 12)]})
 
+class TestReviewPostingFlag(unittest.TestCase):
+    """Inline review posting stays off unless explicitly enabled."""
+
+    def _analysis_with_suggestion(self):
+        return ("text\n```diff\n--- a/f.py\n+++ b/f.py\n"
+                "@@ -1 +1 @@\n-old\n+new\n```")
+
+    def _pr(self):
+        from unittest.mock import Mock
+        pr = Mock()
+        pr.number = 1
+        pr.get_issue_comments.return_value = []
+        return pr
+
+    def test_flag_off_skips_both_paths(self):
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import post_comment_webhook
+        with patch("harperbot.harperbot.load_config",
+                   return_value={"focus": "all", "model": "m",
+                                 "post_inline_reviews": False,
+                                 "post_suggestions_in_yaml": True}):
+            with patch("harperbot.harperbot.save_inline_suggestions") as sv, \
+                 patch("harperbot.harperbot.post_inline_suggestions") as ps:
+                with patch("harperbot.harperbot.Github") as gh:
+                    repo = gh.return_value.get_repo.return_value
+                    repo.get_commit.return_value.get_check_runs.return_value = []
+                    repo.get_pull.return_value.get_issue_comments.return_value = []
+                    post_comment_webhook(
+                    "tok", "o/r",
+                        {"number": 1, "head_sha": "abc1234", "diff": "",
+                         "model_name": "m"},
+                        self._analysis_with_suggestion())
+                    sv.assert_not_called()
+                    ps.assert_not_called()
+
+    def test_flag_on_preserves_existing_routing(self):
+        from unittest.mock import Mock, patch
+        from harperbot.harperbot import post_comment_webhook
+        with patch("harperbot.harperbot.load_config",
+                   return_value={"focus": "all", "model": "m",
+                                 "post_inline_reviews": True,
+                                 "post_suggestions_in_yaml": True}):
+            with patch("harperbot.harperbot.save_inline_suggestions") as sv:
+                with patch("harperbot.harperbot.Github") as gh:
+                    repo = gh.return_value.get_repo.return_value
+                    pr = repo.get_pull.return_value
+                    pr.get_issue_comments.return_value = []
+                    repo.get_commit.return_value.get_check_runs.return_value = []
+                    post_comment_webhook(
+                        "tok", "o/r",
+                        {"number": 1, "head_sha": "abc1234", "diff": "",
+                         "model_name": "m"},
+                        self._analysis_with_suggestion())
+                    self.assertTrue(sv.called)
+
 if __name__ == "__main__":
     unittest.main()

@@ -107,4 +107,8 @@ prompt: |
   Suggestions should be actionable and include accurate line numbers from the diff.
 
 # Post inline suggestions via workflow YAML (true) or Python (false)
+# Post inline review comments. Off by default: the review path has never
+# run successfully. Verify on a throwaway PR before enabling.
+post_inline_reviews: false
+
 post_suggestions_in_yaml: true

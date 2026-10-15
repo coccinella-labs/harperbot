@@ -219,6 +219,9 @@ human-readable review above; the JSON mirrors its actionable items."""
 
     default_config = {
         "focus": "all",
+        # Inline review posting. Off: reviews have never posted
+        # successfully, so this stays off until verified on a throwaway PR.
+        "post_inline_reviews": False,
         # Request custom function tools from the model. Off by default:
         # function calls are never answered yet, and requesting tools
         # diverts responses into function calls the bot drops.
@@ -1310,11 +1313,19 @@ def post_comment_webhook(github_token: str, repo_name: str, pr_details: dict, an
         upsert_analysis_comment(pr, formatted_comment)
 
         # Post or save inline suggestions based on config
-        post_in_yaml = config.get("post_suggestions_in_yaml", True)
-        if post_in_yaml:
-            save_inline_suggestions(pr_details, suggestions)
-        else:
-            post_inline_suggestions(pr, pr_details, suggestions, github_token, repo)
+        # Review posting is gated: inline reviews have never run
+        # successfully, so they stay off until verified on a throwaway PR.
+        if config.get("post_inline_reviews", False):
+            post_in_yaml = config.get("post_suggestions_in_yaml", True)
+            if post_in_yaml:
+                save_inline_suggestions(pr_details, suggestions)
+            else:
+                post_inline_suggestions(pr, pr_details, suggestions,
+                                        github_token, repo)
+        elif suggestions:
+            logging.info(
+                f"Skipping {len(suggestions)} inline suggestions: "
+                "post_inline_reviews is off")
 
         # Apply authoring features if enabled
         if config.get("enable_authoring", False):
